@@ -1,3 +1,4 @@
+using Xunit;
 using SwiftRide.TripService.Infrastructure;
 
 namespace SwiftRide.TripService.Tests;
