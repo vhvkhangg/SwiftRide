@@ -1,0 +1,104 @@
+services:
+  trip-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${TRIP_DB_NAME:-swiftride_trip}
+      POSTGRES_USER: ${TRIP_DB_USER:-swiftride}
+      POSTGRES_PASSWORD: ${TRIP_DB_PASSWORD:-swiftride_dev}
+    ports:
+      - "5433:5432"
+    volumes:
+      - trip-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TRIP_DB_USER:-swiftride} -d ${TRIP_DB_NAME:-swiftride_trip}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  matching-mongodb:
+    image: mongo:8
+    ports:
+      - "27017:27017"
+    volumes:
+      - matching-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payment-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${PAYMENT_DB_NAME:-swiftride_payment}
+      POSTGRES_USER: ${PAYMENT_DB_USER:-swiftride}
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:-swiftride_dev}
+    ports:
+      - "5434:5432"
+    volumes:
+      - payment-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PAYMENT_DB_USER:-swiftride} -d ${PAYMENT_DB_NAME:-swiftride_payment}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  trip-service:
+    build:
+      context: .
+      dockerfile: src/TripService/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__TripDb: Host=trip-postgres;Port=5432;Database=${TRIP_DB_NAME:-swiftride_trip};Username=${TRIP_DB_USER:-swiftride};Password=${TRIP_DB_PASSWORD:-swiftride_dev}
+    depends_on:
+      trip-postgres:
+        condition: service_healthy
+    ports:
+      - "5101:8080"
+
+  matching-service:
+    build:
+      context: .
+      dockerfile: src/MatchingService/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__MatchDb: mongodb://matching-mongodb:27017/${MATCH_DB_NAME:-swiftride_matching}
+    depends_on:
+      matching-mongodb:
+        condition: service_healthy
+    ports:
+      - "5102:8080"
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: src/PaymentService/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__PaymentDb: Host=payment-postgres;Port=5432;Database=${PAYMENT_DB_NAME:-swiftride_payment};Username=${PAYMENT_DB_USER:-swiftride};Password=${PAYMENT_DB_PASSWORD:-swiftride_dev}
+    depends_on:
+      payment-postgres:
+        condition: service_healthy
+    ports:
+      - "5103:8080"
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/ApiGateway/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ReverseProxy__Clusters__trip-cluster__Destinations__destination1__Address: http://trip-service:8080/
+      ReverseProxy__Clusters__matching-cluster__Destinations__destination1__Address: http://matching-service:8080/
+      ReverseProxy__Clusters__payment-cluster__Destinations__destination1__Address: http://payment-service:8080/
+    depends_on:
+      - trip-service
+      - matching-service
+      - payment-service
+    ports:
+      - "5100:8080"
+
+volumes:
+  trip-postgres-data:
+  matching-mongo-data:
+  payment-postgres-data:
