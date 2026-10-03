@@ -21,6 +21,11 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 
         builder.Property(payment => payment.Amount)
             .HasColumnName("amount")
+            .HasPrecision(18, 2)
+            .IsRequired();
+
+        builder.Property(payment => payment.Status)
+            .HasColumnName("status")
             .HasConversion<string>()
             .HasMaxLength(32)
             .IsRequired();
