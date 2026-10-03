@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using SwiftRide.PaymentService.Infrastructure;
+using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Domain.Repositories;
 using SwiftRide.PaymentService.Infrastructure.Repositories;
 
@@ -18,7 +18,51 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-app.MapGet("/health", () => Results.Ok(new { service = "payment-service", status = "ok" }))
+app.MapGet(
+    "/health",
+    async (
+        PaymentDbContext dbContext,
+        CancellationToken cancellationToken) =>
+    {
+        try
+        {
+            var canConnect =
+                await dbContext.Database.CanConnectAsync(
+                    cancellationToken);
+
+            if (!canConnect)
+            {
+                return Results.Json(
+                    new
+                    {
+                        service = "payment-service",
+                        status = "unhealthy",
+                        database = "unreachable"
+                    },
+                    statusCode:
+                        StatusCodes.Status503ServiceUnavailable);
+            }
+
+            return Results.Ok(new
+            {
+                service = "payment-service",
+                status = "healthy",
+                database = "connected"
+            });
+        }
+        catch
+        {
+            return Results.Json(
+                new
+                {
+                    service = "payment-service",
+                    status = "unhealthy",
+                    database = "unreachable"
+                },
+                statusCode:
+                    StatusCodes.Status503ServiceUnavailable);
+        }
+    })
     .AllowAnonymous();
 
 app.UseAuthentication();

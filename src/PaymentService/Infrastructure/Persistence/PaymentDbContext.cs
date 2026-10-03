@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Domain.Entities;
 
-namespace SwiftRide.PaymentService.Infrastructure;
+namespace SwiftRide.PaymentService.Infrastructure.Persistence;
 
 public sealed class PaymentDbContext : DbContext
 {

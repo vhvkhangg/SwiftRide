@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Domain.Entities;
 using SwiftRide.PaymentService.Domain.Repositories;
+using SwiftRide.PaymentService.Infrastructure.Persistence;
 
 namespace SwiftRide.PaymentService.Infrastructure.Repositories;
 
