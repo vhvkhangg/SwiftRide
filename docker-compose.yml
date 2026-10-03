@@ -8,7 +8,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - trip-postgres-data:/var/lib/postgresql/data
+      - trip-postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${TRIP_DB_USER:-swiftride} -d ${TRIP_DB_NAME:-swiftride_trip}"]
       interval: 5s
@@ -36,7 +36,7 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - payment-postgres-data:/var/lib/postgresql/data
+      - payment-postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PAYMENT_DB_USER:-swiftride} -d ${PAYMENT_DB_NAME:-swiftride_payment}"]
       interval: 5s
