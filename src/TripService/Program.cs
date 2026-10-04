@@ -13,6 +13,11 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+// --- Đăng ký Dependency Injection (DI) ---
+// Hệ thống sẽ tự động dùng TripRepository mỗi khi có class nào yêu cầu ITripReader hoặc ITripWriter
+builder.Services.AddScoped<SwiftRide.TripService.Domain.Interfaces.ITripReader, SwiftRide.TripService.Infrastructure.Repositories.TripRepository>();
+builder.Services.AddScoped<SwiftRide.TripService.Domain.Interfaces.ITripWriter, SwiftRide.TripService.Infrastructure.Repositories.TripRepository>();
+
 var app = builder.Build();
 
 app.MapGet("/health", () => Results.Ok(new { service = "trip-service", status = "ok" }))
