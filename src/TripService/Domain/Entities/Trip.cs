@@ -36,13 +36,28 @@ public sealed class Trip
             Status = TripStatus.Requested
         };
 
+        trip._state = new RequestedState();
+
         return trip;
     }
 
     // Hàm để phục hồi _state từ Status 
     public void RehydrateState()
     {
-        // Ví dụ: if (Status == TripStatus.Requested) _state = new RequestedState();
+        // Khởi tạo state dựa vào Status lấy từ Database
+        _state = Status switch
+        {
+            TripStatus.Requested => new RequestedState(),
+            TripStatus.DriverAccepted => new DriverAcceptedState(),
+            TripStatus.EnRoute => new EnRouteState(),
+            TripStatus.PickedUp => new PickedUpState(),
+            TripStatus.DroppedOff => new DroppedOffState(),
+            TripStatus.PaymentPending => new PaymentPendingState(),
+            TripStatus.Paid => new PaidState(),
+            TripStatus.Failed => new FailedState(),
+            TripStatus.Cancelled => new CancelledState(),
+            _ => throw new NotImplementedException($"Chưa hỗ trợ Rehydrate cho status {Status}")
+        };
     }
 
     // --- Các hàm Uỷ thác (Delegate) chuyển việc cho _state ---
