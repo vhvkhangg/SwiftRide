@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Domain.Repositories;
 using SwiftRide.PaymentService.Infrastructure.Repositories;
+using SwiftRide.PaymentService.Application.Services;
+using SwiftRide.PaymentService.Api.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +12,11 @@ builder.Services.AddDbContext<PaymentDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("PaymentDb")));
 
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
+
+builder.Services.AddScoped<
+    IPaymentApplicationService,
+    PaymentApplicationService>();
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer();
@@ -17,6 +24,8 @@ builder.Services
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+app.MapPaymentEndpoints();
 
 app.MapGet(
     "/health",
