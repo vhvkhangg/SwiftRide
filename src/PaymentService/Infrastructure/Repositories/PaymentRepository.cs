@@ -36,6 +36,17 @@ public sealed class PaymentRepository : IPaymentRepository
             );
     }
 
+    public async Task<IReadOnlyList<LedgerEntry>> GetLedgerEntriesByPaymentIdAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        return await _dbContext.LedgerEntries
+            .Where(entry => entry.PaymentId == paymentId)
+            .OrderBy(entry => entry.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task AddAsync(
         Payment payment,
         CancellationToken cancellationToken = default)
@@ -43,6 +54,17 @@ public sealed class PaymentRepository : IPaymentRepository
         await _dbContext.Payments.AddAsync(
             payment,
             cancellationToken);
+    }
+
+    public async Task AddLedgerEntriesAsync(
+        IEnumerable<LedgerEntry> entries,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await _dbContext.LedgerEntries.AddRangeAsync(
+            entries,
+            cancellationToken
+        );
     }
 
     public async Task SaveChangesAsync(
