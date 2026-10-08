@@ -1,5 +1,6 @@
 using Moq;
 using SwiftRide.PaymentService.Application.DTOs;
+using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Domain.Entities;
 using SwiftRide.PaymentService.Domain.Enums;
@@ -12,25 +13,35 @@ public sealed class PaymentApplicationServiceTests
 {
     private readonly Mock<IPaymentRepository> _repositoryMock;
     private readonly PaymentApplicationService _service;
+    private readonly Mock<ITripServiceClient> _tripServiceClientMock = new();
 
     public PaymentApplicationServiceTests()
     {
         _repositoryMock = new Mock<IPaymentRepository>();
 
         _service = new PaymentApplicationService(
-            _repositoryMock.Object);
+            _repositoryMock.Object,
+            _tripServiceClientMock.Object
+        );
     }
 
     [Fact]
     public async Task CreatePaymentAsync_WithNewKey_ShouldCreatePaymentAndLedger()
     {
         // Arrange
+        var tripId = Guid.NewGuid();
+        var riderId = Guid.NewGuid();
+        var driverId = Guid.NewGuid();
+
+        var payerAccount = $"rider-{riderId:D}";
+        var payeeAccount = $"driver-{driverId:D}";
+
         var request = new CreatePaymentRequest(
-            Guid.NewGuid(),
+            tripId,
             100_000m,
             "payment-001",
-            "rider-001",
-            "driver-001");
+            payerAccount,
+            payeeAccount);
 
         _repositoryMock
             .Setup(repository =>
@@ -57,6 +68,23 @@ public sealed class PaymentApplicationServiceTests
             .Setup(repository =>
                 repository.SaveChangesAsync(
                     It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _tripServiceClientMock
+            .Setup(client => client.GetByIdAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TripSnapshot(
+                tripId,
+                riderId,
+                driverId,
+                100_000m,
+                TripStatusCode.PaymentPending));
+
+        _tripServiceClientMock
+            .Setup(client => client.MarkPaidAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
@@ -89,13 +117,13 @@ public sealed class PaymentApplicationServiceTests
                                     entry.Type ==
                                     LedgerEntryType.Debit &&
                                     entry.Account ==
-                                    "rider-001") &&
+                                    payerAccount) &&
                             entries.Any(
                                 entry =>
                                     entry.Type ==
                                     LedgerEntryType.Credit &&
                                     entry.Account ==
-                                    "driver-001")),
+                                    payeeAccount)),
                     It.IsAny<CancellationToken>()),
             Times.Once);
 
@@ -103,6 +131,12 @@ public sealed class PaymentApplicationServiceTests
             repository =>
                 repository.SaveChangesAsync(
                     It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _tripServiceClientMock.Verify(
+            client => client.MarkPaidAsync(
+                tripId,
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
