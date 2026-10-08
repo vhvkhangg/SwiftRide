@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Domain.Entities;
+using SwiftRide.TripService.Domain.Enums;
 using SwiftRide.TripService.Domain.Interfaces;
 
 namespace SwiftRide.TripService.Application.Services;
@@ -22,9 +23,9 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task<TripResponse> CreateAsync(CreateTripRequest request, CancellationToken ct = default)
     {
         var trip = Trip.Create(
-            request.RiderId, 
-            request.PickupAddress, 
-            request.DropoffAddress, 
+            request.RiderId,
+            request.PickupAddress,
+            request.DropoffAddress,
             request.FareEstimate);
 
         await _writer.AddAsync(trip, ct);
@@ -44,8 +45,31 @@ public sealed class TripApplicationService : ITripApplicationService
 
     // --- CÁC HÀM DƯỚI ĐÂY SẼ LÀM Ở CÁC BƯỚC TIẾP THEO ---
 
-    public Task<TripResponse> GetByIdAsync(Guid tripId, CancellationToken ct = default) => throw new NotImplementedException();
-    
+    public async Task<TripResponse> GetByIdAsync(
+    Guid tripId,
+    CancellationToken ct = default)
+    {
+        var trip = await _reader.GetByIdAsync(tripId, ct);
+
+        if (trip is null)
+        {
+            throw new KeyNotFoundException(
+                $"Không tìm thấy chuyến đi '{tripId}'.");
+        }
+
+        return new TripResponse(
+            trip.Id,
+            trip.RiderId,
+            trip.DriverId,
+            trip.PickupAddress,
+            trip.DropoffAddress,
+            trip.FareEstimate,
+            trip.Status,
+            trip.CreatedAt,
+            trip.UpdatedAt
+        );
+    }
+
     public async Task DriverAcceptAsync(Guid tripId, DriverAcceptRequest request, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
@@ -103,6 +127,9 @@ public sealed class TripApplicationService : ITripApplicationService
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
         if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+
+        // Bỏ qua nếu ĐÃ thanh toán xong từ trước
+        if (trip.Status == TripStatus.Paid) return;
 
         trip.MarkPaid();
         await _writer.SaveAsync(trip, ct);

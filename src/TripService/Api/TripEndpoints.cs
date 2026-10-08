@@ -19,6 +19,20 @@ public static class TripEndpoints
             return Results.Created($"/trips/{response.Id}", response);
         });
 
+        // API Lấy thông tin chuyến đi
+        group.MapGet("/{id:guid}", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var response = await service.GetByIdAsync(id, ct);
+                return Results.Ok(response);
+            }
+            catch (Exception ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+        });
+
         // API Tài xế nhận chuyến
         group.MapPost("/{id:guid}/driver-accept", async (Guid id, DriverAcceptRequest request, ITripApplicationService service) =>
         {

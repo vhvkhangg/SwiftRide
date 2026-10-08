@@ -14,6 +14,6 @@ public sealed class PaidState : TripState
     public override TripState Dropoff() => throw new InvalidOperationException("Chuyến đi đã kết thúc.");
     public override TripState Cancel() => throw new InvalidOperationException("Chuyến đi đã kết thúc.");
     public override TripState MarkPaymentPending() => throw new InvalidOperationException("Chuyến đi đã thanh toán xong.");
-    public override TripState MarkPaid() => throw new InvalidOperationException("Chuyến đi đã thanh toán xong.");
+    public override TripState MarkPaid() => this;
     public override TripState MarkFailed() => throw new InvalidOperationException("Chuyến đi đã kết thúc thành công.");
 }
