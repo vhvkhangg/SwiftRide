@@ -43,6 +43,37 @@ namespace SwiftRide.PaymentService.Api.Endpoints
                     error = exception.Message
                 });
             }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new
+                {
+                    error = exception.Message
+                });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.Conflict(new
+                {
+                    error = exception.Message
+                });
+            }
+            catch (HttpRequestException)
+            {
+                return Results.Problem(
+                    detail: "Không thể hoàn tất giao tiếp với TripService. "
+              + "Nếu đã tạo Payment, hãy retry bằng cùng IdempotencyKey.",
+              statusCode: StatusCodes.Status502BadGateway
+                );
+            }
+            catch (TaskCanceledException)
+                when (!cancellationToken.IsCancellationRequested)
+            {
+                return Results.Problem(
+                    detail: "TripService không phản hồi kịp thời. "
+              + "Hãy retry bằng cùng IdempotencyKey.",
+        statusCode: StatusCodes.Status504GatewayTimeout);
+                ;
+            }
         }
 
         private static async Task<IResult> GetPaymentAsync(

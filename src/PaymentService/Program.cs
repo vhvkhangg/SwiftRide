@@ -5,6 +5,8 @@ using SwiftRide.PaymentService.Domain.Repositories;
 using SwiftRide.PaymentService.Infrastructure.Repositories;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Api.Endpoints;
+using SwiftRide.PaymentService.Application.Integrations;
+using SwiftRide.PaymentService.Infrastructure.Clients;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +24,18 @@ builder.Services
     .AddJwtBearer();
 
 builder.Services.AddAuthorization();
+
+builder.Services.AddHttpClient<
+    ITripServiceClient,
+    TripServiceClient
+>(client =>
+{
+    var baseUrl = builder.Configuration["Services:TripService:BaseUrl"]
+    ?? throw new InvalidOperationException("Chưa cấu hình Url của Trípervice.");
+
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 
 var app = builder.Build();
 
