@@ -31,7 +31,7 @@ builder.Services.AddHttpClient<
 >(client =>
 {
     var baseUrl = builder.Configuration["Services:TripService:BaseUrl"]
-    ?? throw new InvalidOperationException("Chưa cấu hình Url của Trípervice.");
+    ?? throw new InvalidOperationException("Chưa cấu hình URL của TripService.");
 
     client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(5);
@@ -39,7 +39,7 @@ builder.Services.AddHttpClient<
 
 var app = builder.Build();
 
-app.MapPaymentEndpoints();
+app.MapPaymentEndpoints(app.Environment.IsDevelopment());
 
 app.MapGet(
     "/health",
