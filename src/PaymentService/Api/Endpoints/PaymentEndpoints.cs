@@ -55,11 +55,15 @@ public static class PaymentEndpoints
         IPaymentApplicationService service,
         CancellationToken ct)
     {
-        var payment = await service.GetPaymentByTripIdAsync(
-            tripId,
-            ct);
-
-        return payment is null ? Results.NotFound() : Results.Ok(payment);
+        try
+        {
+            var payment = await service.GetPaymentByTripIdAsync(tripId, ct);
+            return payment is null ? Results.NotFound() : Results.Ok(payment);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> RefundPaymentAsync(

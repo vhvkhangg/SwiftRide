@@ -91,7 +91,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 ex);
         }
 
-        await SyncTripAsync(payment, cancellationToken);
+        payment = await SyncTripAsync(payment, cancellationToken);
         return PaymentResponse.From(payment);
     }
 
@@ -104,18 +104,30 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             throw new InvalidOperationException(
                 "IdempotencyKey đã được sử dụng cho payload khác.");
 
-        await SyncTripAsync(payment, ct);
+        payment = await SyncTripAsync(payment, ct);
         return PaymentResponse.From(payment);
     }
 
-    private async Task SyncTripAsync(Payment payment, CancellationToken ct)
+    private async Task<Payment> SyncTripAsync(Payment payment, CancellationToken ct)
     {
         if (payment.Status != PaymentStatus.Succeeded || payment.IsTripSynced)
-            return;
+            return payment;
 
         await _trips.MarkPaidAsync(payment.TripId, ct);
         payment.MarkTripSynced();
-        await _payments.SaveChangesAsync(ct);
+        try
+        {
+            await _payments.SaveChangesAsync(ct);
+            return payment;
+        }
+        catch (ConcurrentPaymentUpdateException)
+        {
+            var latest = await _payments.GetByIdAsync(payment.Id, ct);
+            if (latest is not null && latest.IsTripSynced)
+                return latest;
+
+            throw;
+        }
     }
 
     private static void ValidateText(string? value, string field)
@@ -156,7 +168,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             ?? throw new KeyNotFoundException($"Không tìm thấy Payment '{paymentId}'.");
         if (p.Status != PaymentStatus.Succeeded)
             throw new InvalidOperationException("Chỉ reconcile Payment Succeeded.");
-        await SyncTripAsync(p, cancellationToken);
+        p = await SyncTripAsync(p, cancellationToken);
         return PaymentResponse.From(p);
     }
 
