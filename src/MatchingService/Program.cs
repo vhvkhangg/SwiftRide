@@ -11,7 +11,7 @@ using SwiftRide.MatchingService.Api.Middleware;
 var builder = WebApplication.CreateBuilder(args);
 
 var mongoConnectionString = builder.Configuration.GetConnectionString("MatchDb")
-    ?? throw new InvalidOperationException("Connection string 'MatchDb' is required.");
+    ?? throw new InvalidOperationException("Chuỗi kết nối 'MatchDb' là bắt buộc.");
 
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnectionString));
 builder.Services.AddSingleton<IDriverRepository, MongoDriverRepository>();
@@ -40,10 +40,10 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.MapGet("/health", () => Results.Ok(new { service = "matching-service", status = "ok" }))
-    .WithSummary("Check matching service health")
+app.MapGet("/health", () => Results.Ok(new { service = "matching-service", status = "hoạt động" }))
+    .WithSummary("Kiểm tra trạng thái hoạt động của dịch vụ")
     .AllowAnonymous();
-    
+
 app.MapMatchingEndpoints();
 app.MapDriverEndpoints();
 app.UseAuthentication();
