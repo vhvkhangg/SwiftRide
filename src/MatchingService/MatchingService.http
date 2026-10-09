@@ -1,0 +1,38 @@
+@baseUrl = http://localhost:5000
+
+### Health
+GET {{baseUrl}}/health
+
+### Quote
+POST {{baseUrl}}/quote
+Content-Type: application/json
+
+{
+  "distance": 8.5,
+  "estimatedTime": 22,
+  "rideType": "Car",
+  "surge": 1.2,
+  "promoCode": "WELCOME10"
+}
+
+### Update driver location
+POST {{baseUrl}}/api/drivers/location
+Content-Type: application/json
+
+{
+  "driverId": "driver-001",
+  "latitude": 10.7769,
+  "longitude": 106.7009,
+  "isAvailable": true
+}
+
+### Match drivers
+POST {{baseUrl}}/match
+Content-Type: application/json
+
+{
+  "tripId": "trip-001",
+  "pickupLatitude": 10.7769,
+  "pickupLongitude": 106.7009,
+  "radiusKm": 5
+}
