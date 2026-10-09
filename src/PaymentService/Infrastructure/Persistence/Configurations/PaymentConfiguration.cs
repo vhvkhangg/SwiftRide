@@ -23,10 +23,18 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
             .HasMaxLength(128).IsRequired();
         builder.Property(x => x.IsTripSynced).HasColumnName("is_trip_synced")
             .HasDefaultValue(false).IsRequired();
+        builder.Property(x => x.Version)
+            .HasColumnName("version")
+            .HasDefaultValue(0L)
+            .IsConcurrencyToken()
+            .IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
         builder.HasIndex(x => x.IdempotencyKey).IsUnique()
             .HasDatabaseName("ux_payments_idempotency_key");
-        builder.HasIndex(x => x.TripId).HasDatabaseName("ix_payments_trip_id");
+        builder.HasIndex(x => x.TripId)
+            .IsUnique()
+            .HasDatabaseName("ux_payments_settled_trip")
+            .HasFilter("status IN ('Succeeded', 'Refunded')");
     }
 }

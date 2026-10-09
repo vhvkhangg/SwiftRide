@@ -4,6 +4,7 @@ using SwiftRide.PaymentService.Domain.Entities;
 using SwiftRide.PaymentService.Domain.Exceptions;
 using SwiftRide.PaymentService.Domain.Repositories;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
+using SwiftRide.PaymentService.Domain.Enums;
 
 namespace SwiftRide.PaymentService.Infrastructure.Repositories;
 
@@ -14,6 +15,15 @@ public sealed class PaymentRepository : IPaymentRepository
 
     public Task<Payment?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         _db.Payments.SingleOrDefaultAsync(x => x.Id == id, ct);
+
+    public Task<Payment?> GetSettledByTripIdAsync(
+        Guid tripId,
+        CancellationToken ct = default) =>
+            _db.Payments.SingleOrDefaultAsync(
+                x => x.TripId == tripId &&
+                    (x.Status == PaymentStatus.Succeeded ||
+                    x.Status == PaymentStatus.Refunded),
+                ct);
 
     public Task<Payment?> GetByIdempotencyKeyAsync(string key, CancellationToken ct = default) =>
         _db.Payments.SingleOrDefaultAsync(x => x.IdempotencyKey == key, ct);
@@ -35,6 +45,12 @@ public sealed class PaymentRepository : IPaymentRepository
         {
             await _db.SaveChangesAsync(ct);
         }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            _db.ChangeTracker.Clear();
+
+            throw new ConcurrentPaymentUpdateException(exception);
+        }
         catch (DbUpdateException exception)
             when (exception.InnerException is PostgresException pg &&
                   pg.SqlState == PostgresErrorCodes.UniqueViolation &&
@@ -42,6 +58,15 @@ public sealed class PaymentRepository : IPaymentRepository
         {
             _db.ChangeTracker.Clear();
             throw new DuplicateIdempotencyKeyException(exception);
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is PostgresException pg &&
+                pg.SqlState == PostgresErrorCodes.UniqueViolation &&
+                pg.ConstraintName == "ux_payments_settled_trip")
+        {
+            _db.ChangeTracker.Clear();
+
+            throw new TripAlreadyPaidException(exception);
         }
     }
 }

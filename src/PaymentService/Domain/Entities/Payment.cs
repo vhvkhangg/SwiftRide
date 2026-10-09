@@ -12,6 +12,7 @@ public class Payment
     public string PayerAccount { get; private set; } = string.Empty;
     public string PayeeAccount { get; private set; } = string.Empty;
     public bool IsTripSynced { get; private set; }
+    public long Version { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -27,6 +28,7 @@ public class Payment
         PayeeAccount = payee;
         Status = PaymentStatus.Pending;
         IsTripSynced = false;
+        Version = 0;
         CreatedAt = UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -54,6 +56,7 @@ public class Payment
     {
         EnsureStatus(PaymentStatus.Pending);
         Status = PaymentStatus.Succeeded;
+        Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -61,6 +64,7 @@ public class Payment
     {
         EnsureStatus(PaymentStatus.Pending);
         Status = PaymentStatus.Failed;
+        Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -68,6 +72,7 @@ public class Payment
     {
         EnsureStatus(PaymentStatus.Succeeded);
         Status = PaymentStatus.Refunded;
+        Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -76,6 +81,7 @@ public class Payment
         EnsureStatus(PaymentStatus.Succeeded);
         if (IsTripSynced) return;
         IsTripSynced = true;
+        Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

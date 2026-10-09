@@ -8,6 +8,9 @@ public interface IPaymentApplicationService
         CreatePaymentRequest request, CancellationToken cancellationToken = default);
     Task<PaymentResponse?> GetPaymentByIdAsync(
         Guid paymentId, CancellationToken cancellationToken = default);
+    Task<PaymentResponse?> GetPaymentByTripIdAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default);
     Task<RefundPaymentResponse> RefundPaymentAsync(
         Guid paymentId, CancellationToken cancellationToken = default);
     Task<PaymentResponse> ReconcilePaymentAsync(
