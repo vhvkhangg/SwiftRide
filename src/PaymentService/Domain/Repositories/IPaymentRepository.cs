@@ -8,6 +8,10 @@ namespace SwiftRide.PaymentService.Domain.Repositories
             Guid id,
             CancellationToken cancellationToken = default);
 
+        Task<Payment?> GetSettledByTripIdAsync(
+            Guid tripId,
+            CancellationToken cancellationToken = default);
+
         Task<Payment?> GetByIdempotencyKeyAsync(
             string idempotencyKey,
             CancellationToken cancellationToken = default);

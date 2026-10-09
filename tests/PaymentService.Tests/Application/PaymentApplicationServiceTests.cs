@@ -38,6 +38,19 @@ public sealed class PaymentApplicationServiceTests
             new TripSnapshot(tripId, rider, driver, 100_000m, TripStatusCode.PaymentPending));
     }
 
+    private static Payment NewSucceededPayment(Guid tripId)
+    {
+        var payment = Payment.Create(
+            tripId,
+            100_000m,
+            Guid.NewGuid().ToString("N"),
+            "rider-001",
+            "driver-001");
+
+        payment.MarkSucceeded();
+        return payment;
+    }
+
     [Fact]
     public async Task Create_NewPayment_ShouldCommitLedgerThenSyncTrip()
     {
@@ -216,5 +229,256 @@ public sealed class PaymentApplicationServiceTests
         _repo.Setup(x => x.GetByIdAsync(p.Id, It.IsAny<CancellationToken>())).ReturnsAsync(p);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             _service.RefundPaymentAsync(p.Id, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Create_SameTripDifferentKey_ShouldReject()
+    {
+        var tripId = Guid.NewGuid();
+        var existing = NewSucceededPayment(tripId);
+
+        var request = new CreatePaymentRequest(
+            tripId,
+            100_000m,
+            "different-key",
+            "rider-001",
+            "driver-001");
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Payment?)null);
+
+        _repo.Setup(x => x.GetSettledByTripIdAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.CreatePaymentAsync(
+                request, TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _trip.Verify(x => x.GetByIdAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Create_DatabaseTripConflict_ShouldReject()
+    {
+        var tripId = Guid.NewGuid();
+        var riderId = Guid.NewGuid();
+        var driverId = Guid.NewGuid();
+
+        var request = new CreatePaymentRequest(
+            tripId,
+            100_000m,
+            "another-key",
+            $"rider-{riderId:D}",
+            $"driver-{driverId:D}");
+
+        var snapshot = new TripSnapshot(
+            tripId,
+            riderId,
+            driverId,
+            100_000m,
+            TripStatusCode.PaymentPending);
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Payment?)null);
+
+        _repo.Setup(x => x.GetSettledByTripIdAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Payment?)null);
+
+        _trip.Setup(x => x.GetByIdAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
+
+        _repo.Setup(x => x.SaveChangesAsync(
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TripAlreadyPaidException(
+                new Exception("Simulated unique violation")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.CreatePaymentAsync(
+                request, TestContext.Current.CancellationToken));
+
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Create_SameKeyExisting_ShouldReturnExisting()
+    {
+        var tripId = Guid.NewGuid();
+        var existing = NewSucceededPayment(tripId);
+        existing.MarkTripSynced();
+
+        var request = new CreatePaymentRequest(
+            tripId,
+            existing.Amount,
+            existing.IdempotencyKey,
+            existing.PayerAccount,
+            existing.PayeeAccount);
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        var result = await _service.CreatePaymentAsync(
+            request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(existing.Id, result.Id);
+        Assert.True(result.IsTripSynced);
+
+        _repo.Verify(x => x.GetSettledByTripIdAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetByTripId_Existing_ShouldReturnPayment()
+    {
+        var tripId = Guid.NewGuid();
+        var existing = NewSucceededPayment(tripId);
+
+        _repo.Setup(x => x.GetSettledByTripIdAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        var result = await _service.GetPaymentByTripIdAsync(
+            tripId, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal(existing.Id, result.Id);
+        Assert.Equal(tripId, result.TripId);
+        Assert.Equal("Succeeded", result.Status);
+    }
+
+    [Fact]
+    public async Task GetByTripId_Missing_ShouldReturnNull()
+    {
+        var tripId = Guid.NewGuid();
+
+        _repo.Setup(x => x.GetSettledByTripIdAsync(
+                tripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Payment?)null);
+
+        var result = await _service.GetPaymentByTripIdAsync(
+            tripId, TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetByTripId_EmptyId_ShouldThrow()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.GetPaymentByTripIdAsync(
+                Guid.Empty,
+                TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.GetSettledByTripIdAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Refund_InvalidLedger_ShouldReject()
+    {
+        var payment = NewSucceededPayment(Guid.NewGuid());
+
+        var invalidLedger = new[]
+        {
+            LedgerEntry.Create(
+                payment.Id,
+                LedgerEntryType.Debit,
+                payment.PayerAccount,
+                payment.Amount)
+        };
+
+        _repo.Setup(x => x.GetByIdAsync(
+                payment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(payment);
+
+        _repo.Setup(x => x.GetLedgerEntriesByPaymentIdAsync(
+                payment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(invalidLedger);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.RefundPaymentAsync(
+                payment.Id,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(PaymentStatus.Succeeded, payment.Status);
+
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.IsAny<IEnumerable<LedgerEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Refund_ConcurrencyConflict_ShouldPropagate()
+    {
+        var payment = NewSucceededPayment(Guid.NewGuid());
+
+        var entries = new[]
+        {
+            LedgerEntry.Create(
+                payment.Id,
+                LedgerEntryType.Debit,
+                payment.PayerAccount,
+                payment.Amount),
+
+            LedgerEntry.Create(
+                payment.Id,
+                LedgerEntryType.Credit,
+                payment.PayeeAccount,
+                payment.Amount)
+        };
+
+        _repo.Setup(x => x.GetByIdAsync(
+                payment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(payment);
+
+        _repo.Setup(x => x.GetLedgerEntriesByPaymentIdAsync(
+                payment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entries);
+
+        _repo.Setup(x => x.SaveChangesAsync(
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrentPaymentUpdateException(
+                new Exception("Simulated concurrency conflict")));
+
+        await Assert.ThrowsAsync<ConcurrentPaymentUpdateException>(
+            () => _service.RefundPaymentAsync(
+                payment.Id,
+                TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.Is<IEnumerable<LedgerEntry>>(
+                x => x.Count() == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

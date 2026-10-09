@@ -1,5 +1,6 @@
 using SwiftRide.PaymentService.Application.DTOs;
 using SwiftRide.PaymentService.Application.Services;
+using SwiftRide.PaymentService.Domain.Exceptions;
 
 namespace SwiftRide.PaymentService.Api.Endpoints;
 
@@ -11,6 +12,7 @@ public static class PaymentEndpoints
         var group = endpoints.MapGroup("/payments");
         group.MapPost("/", CreatePaymentAsync);
         group.MapGet("/{id:guid}", GetPaymentAsync);
+        group.MapGet("/trip/{tripId:guid}", GetPaymentByTripAsync);
         group.MapPost("/{id:guid}/refund", RefundPaymentAsync);
         if (enableDevelopmentReconciliation)
             group.MapPost("/{id:guid}/reconcile", ReconcilePaymentAsync);
@@ -28,6 +30,7 @@ public static class PaymentEndpoints
         catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
         catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        catch (ConcurrentPaymentUpdateException ex) { return Results.Conflict(new { error = ex.Message }); }
         catch (HttpRequestException)
         {
             return Results.Problem(detail: "Lỗi giao tiếp TripService. Retry với cùng IdempotencyKey.",
@@ -47,12 +50,25 @@ public static class PaymentEndpoints
         return payment is null ? Results.NotFound() : Results.Ok(payment);
     }
 
+    private static async Task<IResult> GetPaymentByTripAsync(
+        Guid tripId,
+        IPaymentApplicationService service,
+        CancellationToken ct)
+    {
+        var payment = await service.GetPaymentByTripIdAsync(
+            tripId,
+            ct);
+
+        return payment is null ? Results.NotFound() : Results.Ok(payment);
+    }
+
     private static async Task<IResult> RefundPaymentAsync(
         Guid id, IPaymentApplicationService service, CancellationToken ct)
     {
         try { return Results.Ok(await service.RefundPaymentAsync(id, ct)); }
         catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
         catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        catch (ConcurrentPaymentUpdateException ex) { return Results.Conflict(new { error = ex.Message }); }
     }
 
     private static async Task<IResult> ReconcilePaymentAsync(
@@ -61,6 +77,7 @@ public static class PaymentEndpoints
         try { return Results.Ok(await service.ReconcilePaymentAsync(id, ct)); }
         catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
         catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        catch (ConcurrentPaymentUpdateException ex) { return Results.Conflict(new { error = ex.Message }); }
         catch (HttpRequestException)
         {
             return Results.Problem(detail: "Lỗi giao tiếp TripService.",

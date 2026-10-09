@@ -35,6 +35,15 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         if (existing is not null)
             return await HandleExistingAsync(existing, request, cancellationToken);
 
+        var existingTripPayment = await _payments.GetSettledByTripIdAsync(request.TripId, cancellationToken);
+
+        if (existingTripPayment is not null)
+        {
+            throw new InvalidOperationException(
+                "Trip đã có Payment được ghi nhận. " +
+                "Không thể thanh toán lại bằng IdempotencyKey khác.");
+        }
+
         var trip = await _trips.GetByIdAsync(request.TripId, cancellationToken)
             ?? throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{request.TripId}'.");
         if (trip.Status != TripStatusCode.PaymentPending)
@@ -74,6 +83,12 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 throw new InvalidOperationException(
                     "Không tải được Payment sau khi trùng key. Hãy retry cùng key.");
             return await HandleExistingAsync(winner, request, cancellationToken);
+        }
+        catch (TripAlreadyPaidException ex)
+        {
+            throw new InvalidOperationException(
+                "Trip vừa được thanh toán bởi request khác.",
+                ex);
         }
 
         await SyncTripAsync(payment, cancellationToken);
@@ -116,6 +131,24 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         return p is null ? null : PaymentResponse.From(p);
     }
 
+    public async Task<PaymentResponse?> GetPaymentByTripIdAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        if (tripId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "TripId không được để trống.",
+                nameof(tripId));
+        }
+
+        var payment = await _payments.GetSettledByTripIdAsync(
+            tripId,
+            cancellationToken);
+
+        return payment is null ? null : PaymentResponse.From(payment);
+    }
+
     public async Task<PaymentResponse> ReconcilePaymentAsync(
         Guid paymentId, CancellationToken cancellationToken = default)
     {
@@ -137,8 +170,24 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         var original = await _payments.GetLedgerEntriesByPaymentIdAsync(
             paymentId, cancellationToken);
-        if (original.Count == 0)
-            throw new InvalidOperationException("Không tìm thấy ledger của Payment.");
+        var validOriginalLedger =
+            original.Count == 2 &&
+            original.Any(x =>
+                x.Type == LedgerEntryType.Debit &&
+                x.Account == payment.PayerAccount &&
+                x.Amount == payment.Amount) &&
+            original.Any(x =>
+                x.Type == LedgerEntryType.Credit &&
+                x.Account == payment.PayeeAccount &&
+                x.Amount == payment.Amount);
+
+        if (!validOriginalLedger)
+        {
+            throw new InvalidOperationException(
+                "Ledger gốc không hợp lệ. " +
+                "Không thể thực hiện refund.");
+        }
+        
         payment.Refund();
         var reversal = original.Select(x => LedgerEntry.Create(payment.Id,
             x.Type == LedgerEntryType.Debit ? LedgerEntryType.Credit : LedgerEntryType.Debit,
