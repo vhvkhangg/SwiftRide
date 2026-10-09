@@ -481,4 +481,83 @@ public sealed class PaymentApplicationServiceTests
                 x => x.Count() == 2),
             It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task ExistingPayment_SyncConflict_AlreadySynced_ShouldReturnLatest()
+    {
+        var (request, _) = NewRequest();
+        var stale = Payment.Create(request.TripId, request.Amount,
+            request.IdempotencyKey, request.PayerAccount, request.PayeeAccount);
+        stale.MarkSucceeded();
+
+        var latest = Payment.Create(request.TripId, request.Amount,
+            request.IdempotencyKey, request.PayerAccount, request.PayeeAccount);
+        latest.MarkSucceeded();
+        latest.MarkTripSynced();
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale);
+        _trip.Setup(x => x.MarkPaidAsync(request.TripId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrentPaymentUpdateException(new Exception("stale Version")));
+        _repo.Setup(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(latest);
+
+        var result = await _service.CreatePaymentAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsTripSynced);
+        Assert.Equal(latest.Id, result.Id);
+        _repo.Verify(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.MarkPaidAsync(request.TripId, It.IsAny<CancellationToken>()), Times.Once);
+        _repo.Verify(x => x.AddAsync(It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExistingPayment_SyncConflict_StillUnsynced_ShouldPropagate()
+    {
+        var (request, _) = NewRequest();
+        var stale = Payment.Create(request.TripId, request.Amount,
+            request.IdempotencyKey, request.PayerAccount, request.PayeeAccount);
+        stale.MarkSucceeded();
+        var latest = Payment.Create(request.TripId, request.Amount,
+            request.IdempotencyKey, request.PayerAccount, request.PayeeAccount);
+        latest.MarkSucceeded();
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale);
+        _trip.Setup(x => x.MarkPaidAsync(request.TripId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrentPaymentUpdateException(new Exception("stale Version")));
+        _repo.Setup(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(latest);
+
+        await Assert.ThrowsAsync<ConcurrentPaymentUpdateException>(() =>
+            _service.CreatePaymentAsync(request, TestContext.Current.CancellationToken));
+        _repo.Verify(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Reconcile_SyncConflict_AlreadySynced_ShouldReturnLatest()
+    {
+        var stale = NewSucceededPayment(Guid.NewGuid());
+        var latest = NewSucceededPayment(stale.TripId);
+        latest.MarkTripSynced();
+        _repo.SetupSequence(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale)
+            .ReturnsAsync(latest);
+        _trip.Setup(x => x.MarkPaidAsync(stale.TripId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrentPaymentUpdateException(new Exception("stale Version")));
+
+        var result = await _service.ReconcilePaymentAsync(stale.Id, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsTripSynced);
+        Assert.Equal(latest.Id, result.Id);
+        _repo.Verify(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
 }
