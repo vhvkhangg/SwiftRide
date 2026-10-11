@@ -85,9 +85,9 @@ small { line-height: 1.6; }
 .app-header { height: 82px; display: flex; align-items: center; gap: 22px; padding: 0 34px; background: #fff; border-bottom: 1px solid #e8eeeb; position: relative; z-index: 10; }
 .header-separator { width: 1px; height: 22px; background: var(--line); }
 .header-tagline { color: #82908e; font-size: 11px; }
-.role-tabs { position: absolute; left: 50%; transform: translateX(-50%); display: flex; padding: 4px; background: #f3f6f5; border: 1px solid #edf0ee; border-radius: 11px; }
-.role-tabs button { border: none; background: none; display: flex; align-items: center; gap: 8px; color: #748480; font-size: 12px; padding: 10px 19px; border-radius: 8px; }
-.role-tabs button.active { background: white; color: var(--teal-dark); box-shadow: 0 2px 7px #233c3210; font-weight: 600; }
+.portal-brand { display: flex; align-items: center; gap: 10px; }
+.portal-label { font-size: 9px; font-weight: 600; letter-spacing: 1px; color: var(--teal-dark); background: #e9f4f1; border-radius: 5px; padding: 6px 8px; }
+.login-story .portal-label { color: #d5ebe5; background: #ffffff16; }
 .header-actions { margin-left: auto; display: flex; align-items: center; gap: 22px; }
 .demo-trigger { display: flex; align-items: center; gap: 8px; border: 0; background: none; font-size: 10px; color: #647974; padding: 12px 0; }
 .demo-trigger .status-dot { color: #c79749; }
@@ -288,13 +288,12 @@ small { line-height: 1.6; }
   .login-story { padding-inline: 35px; }.login-map { margin-inline: -35px; }.login-form-area { padding-inline: 30px; }
 }
 @media (max-width: 800px) {
-  .app-header { height: 112px; padding: 12px 20px 57px; align-items: center; gap: 10px; }
+  .app-header { height: 72px; padding: 12px 20px; align-items: center; gap: 10px; }
   .app-header .logo { font-size: 22px; }.app-header .logo svg { width: 29px; height: 30px; }
-  .role-tabs { left: 20px; right: 20px; bottom: 10px; transform: none; padding: 3px; }
-  .role-tabs button { flex: 1; justify-content: center; padding: 8px 10px; font-size: 11px; }
-  .demo-trigger > span:nth-child(2) { font-size: 9px; }.demo-trigger > svg { display: none; }
+  .portal-brand { gap: 6px; }.app-header .portal-label { font-size: 7px; padding: 5px; }
+  .demo-trigger > span { display: none; }.demo-trigger > svg { display: block; }.demo-trigger { width: 36px; height: 40px; justify-content: center; }
   .header-actions { gap: 12px; }.account-trigger > svg:last-child { display: none; }.account-trigger .avatar { width: 31px; height: 31px; }
-  .workspace { display: flow-root; height: auto; min-height: calc(100dvh - 112px); padding: 0 0 15px; overflow: clip; }
+  .workspace { display: flow-root; height: auto; min-height: calc(100dvh - 72px); padding: 0 0 15px; overflow: clip; }
   .city-map { inset: 0 0 auto; height: 260px; }.map-art { width: 100%; height: 100%; }
   .map-heading { top: 15px; left: 17px; }.map-city { padding: 9px 11px; font-size: 10px; gap: 8px; }
   .map-caption { display: none; }.map-controls { top: 17px; right: 16px; gap: 5px; }
@@ -344,6 +343,5 @@ small { line-height: 1.6; }
 .edition, .panel-footer, .journey-topline, .divider-label, .demo-accounts > small,
 .demo-accounts > p, .login-disclaimer, .home-promise p, .included { color: #60776d; }
 .simulation-step > span, .simulation-step p, .demo-footnote { color: #60777a; }
-.role-tabs button { min-height: 36px; }
 .text-link, .simulation-step button { min-height: 44px; }
 .account-trigger { min-height: 40px; }

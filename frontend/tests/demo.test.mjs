@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { demoReducer, initialState, readSnapshot, paymentKey } from '../src/lib/demo.ts';
+import { demoReducer, initialState, readSnapshot, paymentKey } from '../shared/lib/demo.ts';
 
 const draft = () => ({ ...initialState, role: 'rider', destination: 'market' });
 const run = (state, ...types) => types.reduce((current, type) => demoReducer(current, { type }), state);
@@ -45,9 +45,9 @@ test('snapshot rejects malformed and inconsistent local storage', () => {
   }
   assert.deepEqual(readSnapshot(JSON.stringify(draft())), draft());
 });
-test('changing role preserves shared trip; new trip receives a new payment key', () => {
+test('logout preserves local trip; new trip receives a new payment key', () => {
   const before = { ...draft(), status: 'enroute' };
-  const after = demoReducer(before, { type: 'role', role: 'driver' });
+  const after = demoReducer(before, { type: 'role', role: null });
   assert.equal(after.status, 'enroute');
   assert.notEqual(paymentKey(run(after, 'reset')), paymentKey(before));
 });

@@ -1,15 +1,21 @@
 {
-  "name": "swiftride-web",
+  "name": "swiftride-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "workspaces": ["apps/rider", "apps/driver"],
   "engines": {
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 127.0.0.1",
+    "dev": "npm run dev:rider",
+    "dev:rider": "npm run dev --workspace=@swiftride/rider",
+    "dev:driver": "npm run dev --workspace=@swiftride/driver",
+    "build": "npm run build --workspaces",
+    "build:rider": "npm run build --workspace=@swiftride/rider",
+    "build:driver": "npm run build --workspace=@swiftride/driver",
+    "preview:rider": "npm run preview --workspace=@swiftride/rider",
+    "preview:driver": "npm run preview --workspace=@swiftride/driver",
     "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {

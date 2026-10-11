@@ -16,7 +16,7 @@ Repository scaffold này ưu tiên **luồng cơ bản chạy được trước*
 
 Các phần **RabbitMQ/MassTransit, Transactional Outbox, OpenTelemetry và Saga** chưa được đưa vào dependency/core scaffold này. Chúng nên được bổ sung sau khi end-to-end basic flow ổn định.
 
-Frontend Rider/Driver nằm trong `frontend/`, dùng **React + TypeScript + Vite**. Bản giao diện chạy độc lập bằng dữ liệu mô phỏng, chưa gọi backend. Xem `frontend/README.md` để chạy và hướng dẫn nối API sau.
+Hai ứng dụng frontend độc lập nằm trong `frontend/apps/rider` (port 5173) và `frontend/apps/driver` (port 5174), dùng **React + TypeScript + Vite**. Mỗi app có entry và bản build riêng; component nền dùng chung trong `frontend/shared`. Bản giao diện dùng dữ liệu mô phỏng, chưa gọi backend. Xem `frontend/README.md` để chạy và hướng dẫn nối API sau.
 
 ## 2. Kiến trúc
 
