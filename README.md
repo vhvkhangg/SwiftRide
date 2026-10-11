@@ -16,12 +16,12 @@ Repository scaffold này ưu tiên **luồng cơ bản chạy được trước*
 
 Các phần **RabbitMQ/MassTransit, Transactional Outbox, OpenTelemetry và Saga** chưa được đưa vào dependency/core scaffold này. Chúng nên được bổ sung sau khi end-to-end basic flow ổn định.
 
-Frontend chưa được chọn công nghệ nên repository hiện **không chứa frontend-specific files hoặc dependencies**.
+Frontend Rider/Driver nằm trong `frontend/`, dùng **React + TypeScript + Vite**. Bản giao diện chạy độc lập bằng dữ liệu mô phỏng, chưa gọi backend. Xem `frontend/README.md` để chạy và hướng dẫn nối API sau.
 
 ## 2. Kiến trúc
 
 ```text
-Client (frontend TBD)
+Client (React web; demo hiện chưa nối API)
         |
         v
 API Gateway (YARP + JWT)
