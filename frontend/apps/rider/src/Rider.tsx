@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { Dispatch } from 'react';
-import { findPlace, money, places, quoteFor, tripId } from '../lib/demo';
-import type { Action, DemoState } from '../lib/demo';
-import { Badge, Button, Fare, Icon, Modal, Notice, Person, RouteSummary, SafetyNote, Title } from './ui';
+import { findPlace, money, places, quoteFor, tripId } from '../../../shared/lib/demo';
+import type { Action, DemoState } from '../../../shared/lib/demo';
+import { Badge, Button, Fare, Icon, Modal, Notice, Person, RouteSummary, SafetyNote, Title } from '../../../shared/components/ui';
 
 export default function Rider({ state, dispatch, onCancel, onDetails }: { state: DemoState; dispatch: Dispatch<Action>; onCancel: () => void; onDetails: () => void }) {
   const [picker, setPicker] = useState<'pickup' | 'destination' | null>(null);

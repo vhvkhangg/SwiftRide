@@ -16,12 +16,14 @@ Repository scaffold này ưu tiên **luồng cơ bản chạy được trước*
 
 Các phần **RabbitMQ/MassTransit, Transactional Outbox, OpenTelemetry và Saga** chưa được đưa vào dependency/core scaffold này. Chúng nên được bổ sung sau khi end-to-end basic flow ổn định.
 
-Frontend Rider/Driver nằm trong `frontend/`, dùng **React + TypeScript + Vite**. Bản giao diện chạy độc lập bằng dữ liệu mô phỏng, chưa gọi backend. Xem `frontend/README.md` để chạy và hướng dẫn nối API sau.
+Frontend chính chuyển sang **React Native + Expo + TypeScript** trong `mobile/`: hai ứng dụng **SwiftRide Rider** và **SwiftRide Driver** có entry, tên, icon, application ID và cấu hình build độc lập. UI dùng thành phần native, không bọc web bằng WebView. Bản demo chưa gọi backend, hai app chưa đồng bộ chuyến. Xem `mobile/README.md` để chạy trên điện thoại và build Android.
+
+Bản React/Vite trong `frontend/` được giữ làm bản tham chiếu cũ, không phải dependency của mobile và không còn là hướng phát triển chính.
 
 ## 2. Kiến trúc
 
 ```text
-Client (React web; demo hiện chưa nối API)
+Client (React Native: Rider / Driver; demo chưa nối API)
         |
         v
 API Gateway (YARP + JWT)

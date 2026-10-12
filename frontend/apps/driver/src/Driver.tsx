@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import type { Dispatch } from 'react';
-import { findPlace, quoteFor, tripId } from '../lib/demo';
-import type { Action, DemoState } from '../lib/demo';
-import { Avatar, Badge, Button, Fare, Icon, Notice, Person, RouteSummary, SafetyNote, Title } from './ui';
-
-export type Confirmation = { title: string; body: string; label: string; action: Action; danger?: boolean };
+import { findPlace, quoteFor, tripId } from '../../../shared/lib/demo';
+import type { Action, DemoState } from '../../../shared/lib/demo';
+import { Avatar, Badge, Button, Fare, Icon, Notice, Person, RouteSummary, SafetyNote, Title } from '../../../shared/components/ui';
+import type { Confirmation } from '../../../shared/TripShell';
 
 export default function Driver({ state, dispatch, onConfirm }: { state: DemoState; dispatch: Dispatch<Action>; onConfirm: (confirmation: Confirmation) => void }) {
   const [dismissed, setDismissed] = useState(false);
@@ -56,6 +55,6 @@ export default function Driver({ state, dispatch, onConfirm }: { state: DemoStat
     <Notice tone={paid ? 'info' : 'warning'}><strong>{paid ? 'Thanh toán đã hoàn tất' : state.paymentError ? 'Thanh toán cần kiểm tra lại' : state.status === 'droppedoff' ? 'Chờ hành khách thanh toán' : 'Thanh toán đang xử lý'}</strong><p>{paid ? 'Giao dịch mô phỏng đã được ghi nhận.' : 'Kết quả thanh toán được cập nhật riêng với việc hoàn thành chặng đường.'}</p></Notice>
     <div className="summary-card"><div className="receipt-heading">CHUYẾN VỪA QUA<span>{tripId(state)}</span></div><Person role="rider" /><RouteSummary state={state} compact /><Fare state={state} large /></div>
     <Button onClick={() => { if (paid) dispatch({ type: 'reset' }); else onConfirm({ title: 'Về trang chủ demo?', body: 'Thanh toán chưa hoàn tất. Trong bản demo, thao tác này xóa kịch bản hiện tại để bắt đầu lại; không xác nhận đã thu tiền.', label: 'Đặt lại kịch bản demo', action: { type: 'reset' } }); }}>Về trang chủ</Button>
-    {!paid && <p className="fine-print centered muted">Chuyển sang Rider để tiếp tục mô phỏng thanh toán.</p>}
+    {!paid && <div className="simulation-step"><span>ĐIỀU KHIỂN DEMO · PHẢN HỒI THANH TOÁN</span><p>Mô phỏng kết quả hệ thống, không phải tài xế xác nhận thu tiền.</p>{state.status === 'droppedoff' ? <button onClick={() => dispatch({ type: 'pay' })}>Mô phỏng bắt đầu thanh toán<Icon name="arrow" size={15} /></button> : state.paymentError ? <button onClick={() => dispatch({ type: 'retry' })}>Mô phỏng kiểm tra lại</button> : <div><button onClick={() => dispatch({ type: 'settle' })}>Mô phỏng thanh toán thành công<Icon name="check" size={15} /></button><button onClick={() => dispatch({ type: 'payment-error' })}>Mô phỏng lỗi</button></div>}</div>}
   </>;
 }

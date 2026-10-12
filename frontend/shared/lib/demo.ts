@@ -71,7 +71,6 @@ export function demoReducer(state: DemoState, action: Action): DemoState {
   return state;
 }
 
-export const storageKey = 'swiftride-ui-v1';
 const statuses: Status[] = ['idle', 'quoted', 'searching', 'accepted', 'enroute', 'pickedup', 'droppedoff', 'payment_pending', 'paid', 'cancelled', 'failed'];
 
 export function readSnapshot(raw: string | null): DemoState {
@@ -93,16 +92,4 @@ export const quoteFor = (state: DemoState) => findPlace(state.destination || 'ma
 export const tripId = (state: DemoState) => `SR-${state.tripNumber}`;
 export const paymentKey = (state: DemoState) => `demo-payment-${tripId(state)}`;
 
-export const screens: { code: string; label: string; role: Role; status: Status }[] = [
-  { code: 'R01', label: 'Chọn hành trình', role: 'rider', status: 'idle' },
-  { code: 'R02', label: 'Xác nhận giá', role: 'rider', status: 'quoted' },
-  { code: 'R03', label: 'Tìm tài xế', role: 'rider', status: 'searching' },
-  { code: 'R04', label: 'Theo dõi chuyến', role: 'rider', status: 'enroute' },
-  { code: 'R05', label: 'Thanh toán', role: 'rider', status: 'payment_pending' },
-  { code: 'R06', label: 'Chuyến hoàn tất', role: 'rider', status: 'paid' },
-  { code: 'D01', label: 'Trang chủ tài xế', role: 'driver', status: 'idle' },
-  { code: 'D02', label: 'Lời mời nhận chuyến', role: 'driver', status: 'searching' },
-  { code: 'D03', label: 'Đi đón khách', role: 'driver', status: 'accepted' },
-  { code: 'D04', label: 'Thực hiện chuyến', role: 'driver', status: 'pickedup' },
-  { code: 'D05', label: 'Kết quả chuyến', role: 'driver', status: 'payment_pending' },
-];
+export type DemoScreen = { code: string; label: string; status: Status };
