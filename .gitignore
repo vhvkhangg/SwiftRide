@@ -62,3 +62,7 @@ Desktop.ini
 *.bak
 *.swp
 *~
+
+# Gateway EF source is not a local database volume.
+!src/ApiGateway/Data/
+!src/ApiGateway/Data/*.cs

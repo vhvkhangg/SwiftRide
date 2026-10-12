@@ -82,23 +82,49 @@ services:
     ports:
       - "5103:8080"
 
+  auth-mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: swiftride_auth
+      MYSQL_USER: swiftride
+      MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:?Set AUTH_DB_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - auth-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u $$MYSQL_USER -D $$MYSQL_DATABASE -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
   api-gateway:
     build:
       context: .
       dockerfile: src/ApiGateway/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Development
+      AuthDatabase__EnsureCreated: "true"
+      ConnectionStrings__AuthDb: Server=auth-mysql;Port=3306;Database=swiftride_auth;User=swiftride;Password=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
+      JwtSettings__SecretKey: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
       ReverseProxy__Clusters__trip-cluster__Destinations__destination1__Address: http://trip-service:8080/
       ReverseProxy__Clusters__matching-cluster__Destinations__destination1__Address: http://matching-service:8080/
       ReverseProxy__Clusters__payment-cluster__Destinations__destination1__Address: http://payment-service:8080/
     depends_on:
-      - trip-service
-      - matching-service
-      - payment-service
+      auth-mysql:
+        condition: service_healthy
+      trip-service:
+        condition: service_started
+      matching-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
     ports:
       - "5100:8080"
 
 volumes:
+  auth-mysql-data:
   trip-postgres-data:
   matching-mongo-data:
   payment-postgres-data:
