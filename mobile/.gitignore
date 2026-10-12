@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+dist/
+web-dist/
+android/
+ios/
+playwright-output/
+*.apk
+*.aab
+*.ipa
+*.tsbuildinfo

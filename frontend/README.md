@@ -1,5 +1,7 @@
 # SwiftRide Frontend
 
+> Bản web tham chiếu cũ. Hướng phát triển chính đã chuyển sang hai ứng dụng React Native trong `../mobile/`. Xem `../mobile/README.md`. Mobile không import hoặc chạy mã nguồn web này.
+
 Hai ứng dụng web độc lập trong cùng repository: **Rider** và **Driver**. Mỗi app có `package.json`, HTML entry, React entry, màn nghiệp vụ, cấu hình Vite, port và output build riêng. Không chọn ứng dụng bằng `/rider` hoặc `/driver` nữa.
 
 React + TypeScript + Vite; CSS thuần; font Be Vietnam Pro đóng gói tại chỗ. Chỉ chia sẻ component nền, style và logic demo để tránh lặp mã. Không cần .NET, Docker hoặc API key để chạy giao diện.
