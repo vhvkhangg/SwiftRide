@@ -1,10 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <RootNamespace>SwiftRide.ApiGateway</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <UserSecretsId>swiftride-gateway-auth</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" VersionOverride="9.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" VersionOverride="9.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" VersionOverride="9.0.10" PrivateAssets="all" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" VersionOverride="9.0.0" />
     <PackageReference Include="Yarp.ReverseProxy" />
   </ItemGroup>
 </Project>

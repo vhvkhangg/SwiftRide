@@ -8,7 +8,7 @@ COPY ["Directory.Build.props", "."]
 COPY ["Directory.Packages.props", "."]
 COPY ["src/ApiGateway/ApiGateway.csproj", "src/ApiGateway/"]
 RUN dotnet restore "src/ApiGateway/ApiGateway.csproj"
-COPY . .
+COPY src/ApiGateway/ src/ApiGateway/
 WORKDIR "/src/src/ApiGateway"
 RUN dotnet publish "ApiGateway.csproj" -c Release -o /app/publish /p:UseAppHost=false
 

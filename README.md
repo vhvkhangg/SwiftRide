@@ -173,3 +173,7 @@ dotnet test SwiftRide.sln
 ## 9. Ghi chú scaffold
 
 Package này là **khung khởi tạo**, chưa chứa implementation nghiệp vụ của Trip/Matching/Pricing/Payment. Các `Program.cs`, DbContext và health endpoint chỉ tạo baseline để nhóm bắt đầu code trên cùng một cấu trúc thống nhất.
+
+## Authentication tại Gateway
+
+API Gateway đã tích hợp Auth trực tiếp với MySQL, JWT, refresh token rotation/replay detection và YARP identity headers. Toàn bộ solution dùng .NET 10; Gateway giữ EF Core/Pomelo 9 để tương thích MySQL provider. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose yêu cầu thêm AUTH_DB_PASSWORD, AUTH_DB_ROOT_PASSWORD và JWT_SECRET_KEY trong .env.
