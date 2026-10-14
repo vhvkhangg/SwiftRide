@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using SwiftRide.Contracts.Trips;
+using SwiftRide.Messaging;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Domain.Entities;
@@ -13,15 +15,34 @@ public sealed class TripApplicationService : ITripApplicationService
 {
     private readonly ITripWriter _writer;
     private readonly ITripReader _reader;
+    private readonly MessagePublisher _publisher;
 
-    public TripApplicationService(ITripWriter writer, ITripReader reader)
+    public TripApplicationService(ITripWriter writer, ITripReader reader, MessagePublisher publisher)
     {
         _writer = writer;
         _reader = reader;
+        _publisher = publisher;
     }
 
     public async Task<TripResponse> CreateAsync(CreateTripRequest request, CancellationToken ct = default)
     {
+        if (request.RiderId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(request.PickupAddress) ||
+            string.IsNullOrWhiteSpace(request.DropoffAddress) ||
+            request.PickupAddress.Length > 500 || request.DropoffAddress.Length > 500)
+        {
+            throw new ArgumentException("Cần RiderId và hai địa chỉ hợp lệ, tối đa 500 ký tự.");
+        }
+
+        if (!request.PickupLatitude.HasValue || !request.PickupLongitude.HasValue ||
+            !double.IsFinite(request.PickupLatitude.Value) ||
+            !double.IsFinite(request.PickupLongitude.Value) ||
+            request.PickupLatitude.Value < -90 || request.PickupLatitude.Value > 90 ||
+            request.PickupLongitude.Value < -180 || request.PickupLongitude.Value > 180)
+        {
+            throw new ArgumentException("Cần PickupLatitude từ -90 đến 90 và PickupLongitude từ -180 đến 180.");
+        }
+
         var trip = Trip.Create(
             request.RiderId,
             request.PickupAddress,
@@ -29,6 +50,29 @@ public sealed class TripApplicationService : ITripApplicationService
             request.FareEstimate);
 
         await _writer.AddAsync(trip, ct);
+
+        var message = new TripRequestedV1
+        {
+            CorrelationId = trip.Id,
+            TripId = trip.Id,
+            RiderId = trip.RiderId,
+            PickupAddress = trip.PickupAddress,
+            DropoffAddress = trip.DropoffAddress,
+            PickupLatitude = request.PickupLatitude,
+            PickupLongitude = request.PickupLongitude,
+            OccurredAtUtc = new DateTimeOffset(trip.CreatedAt, TimeSpan.Zero)
+        };
+
+        // ponytail: lưu DB và Publish là hai bước; thêm Outbox khi cần bảo đảm phát event sau khi lưu.
+        try
+        {
+            await _publisher.PublishAsync(message, ct);
+        }
+        catch (Exception ex)
+        {
+            // Giữ ID chuyến đã lưu để client không tạo lại chuyến khi gửi message lỗi.
+            throw new TripPublishException(trip.Id, ex);
+        }
 
         return new TripResponse(
             trip.Id,
@@ -142,5 +186,16 @@ public sealed class TripApplicationService : ITripApplicationService
 
         trip.MarkFailed();
         await _writer.SaveAsync(trip, ct);
+    }
+}
+
+public sealed class TripPublishException : Exception
+{
+    public Guid TripId { get; }
+
+    public TripPublishException(Guid tripId, Exception innerException)
+        : base("Chuyến đã lưu nhưng chưa xác nhận được việc gửi message.", innerException)
+    {
+        TripId = tripId;
     }
 }

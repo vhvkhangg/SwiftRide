@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using SwiftRide.Messaging;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Domain.Repositories;
@@ -9,6 +10,8 @@ using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Infrastructure.Clients;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSwiftRideMessaging(builder.Configuration, "payment");
 
 builder.Services.AddDbContext<PaymentDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("PaymentDb")));
@@ -38,6 +41,9 @@ builder.Services.AddHttpClient<
 });
 
 var app = builder.Build();
+
+// Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapPaymentEndpoints(app.Environment.IsDevelopment());
 

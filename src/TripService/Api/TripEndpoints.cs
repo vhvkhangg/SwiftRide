@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
+using SwiftRide.TripService.Application.Services;
 
 namespace SwiftRide.TripService.Api;
 
@@ -13,10 +14,23 @@ public static class TripEndpoints
         var group = app.MapGroup("/trips").WithTags("Trips");
 
         // API Đặt xe (POST /trips)
-        group.MapPost("/", async (CreateTripRequest request, ITripApplicationService service) =>
+        group.MapPost("/", async (CreateTripRequest request, ITripApplicationService service,
+            ILogger<TripApplicationService> logger, CancellationToken ct) =>
         {
-            var response = await service.CreateAsync(request);
-            return Results.Created($"/trips/{response.Id}", response);
+            try
+            {
+                var response = await service.CreateAsync(request, ct);
+                return Results.Created($"/trips/{response.Id}", response);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (TripPublishException ex)
+            {
+                logger.LogError(ex, "Gửi TripRequestedV1 lỗi cho chuyến {TripId}", ex.TripId);
+                return Results.Json(new { tripId = ex.TripId, error = ex.Message }, statusCode: 503);
+            }
         });
 
         // API Lấy thông tin chuyến đi

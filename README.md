@@ -14,7 +14,7 @@ Repository scaffold này ưu tiên **luồng cơ bản chạy được trước*
 - Docker Compose cho toàn bộ backend và 3 database logic riêng.
 - xUnit + Moq cho kiểm thử.
 
-Các phần **RabbitMQ/MassTransit, Transactional Outbox, OpenTelemetry và Saga** chưa được đưa vào dependency/core scaffold này. Chúng nên được bổ sung sau khi end-to-end basic flow ổn định.
+**RabbitMQ/MassTransit** đã có hạ tầng và luồng tạo chuyến, phát `TripRequestedV1`, nhận tại MatchingService để tìm tài xế gần. Xem [hướng dẫn messaging](docs/messaging.md) để chạy và đọc code. Transactional Outbox, OpenTelemetry và Saga chưa được triển khai.
 
 Frontend chính chuyển sang **React Native + Expo + TypeScript** trong `mobile/`: hai ứng dụng **SwiftRide Rider** và **SwiftRide Driver** có entry, tên, icon, application ID và cấu hình build độc lập. UI dùng thành phần native, không bọc web bằng WebView. Bản demo chưa gọi backend, hai app chưa đồng bộ chuyến. Xem `mobile/README.md` để chạy trên điện thoại và build Android.
 
@@ -131,7 +131,7 @@ Core nên triển khai pattern vì có nhu cầu nghiệp vụ, không phải đ
 - **Dependency Injection / DIP**: application/domain phụ thuộc abstraction thay vì hạ tầng cụ thể.
 - **Factory**: chỉ cần nếu có nhiều kiểu payment method cần khởi tạo khác nhau.
 
-Pub/Sub, Outbox và Saga thuộc phần nâng cao sau core.
+Pub/Sub dùng RabbitMQ/MassTransit. Outbox và Saga chưa được triển khai.
 
 ## 8. Chạy project
 

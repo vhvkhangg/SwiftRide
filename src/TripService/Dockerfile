@@ -7,6 +7,8 @@ WORKDIR /src
 COPY ["Directory.Build.props", "."]
 COPY ["Directory.Packages.props", "."]
 COPY ["src/TripService/TripService.csproj", "src/TripService/"]
+COPY ["src/SwiftRide.Contracts/SwiftRide.Contracts.csproj", "src/SwiftRide.Contracts/"]
+COPY ["src/SwiftRide.Messaging/SwiftRide.Messaging.csproj", "src/SwiftRide.Messaging/"]
 RUN dotnet restore "src/TripService/TripService.csproj"
 COPY . .
 WORKDIR "/src/src/TripService"

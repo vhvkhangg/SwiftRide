@@ -8,4 +8,8 @@
     <PackageReference Include="MongoDB.Driver" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SwiftRide.Contracts/SwiftRide.Contracts.csproj" />
+    <ProjectReference Include="../SwiftRide.Messaging/SwiftRide.Messaging.csproj" />
+  </ItemGroup>
 </Project>
