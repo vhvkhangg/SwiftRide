@@ -63,7 +63,6 @@ public sealed class TripApplicationService : ITripApplicationService
             OccurredAtUtc = new DateTimeOffset(trip.CreatedAt, TimeSpan.Zero)
         };
 
-        // ponytail: lưu DB và Publish là hai bước; thêm Outbox khi cần bảo đảm phát event sau khi lưu.
         try
         {
             await _publisher.PublishAsync(message, ct);
