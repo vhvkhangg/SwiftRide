@@ -1,4 +1,5 @@
 using MassTransit;
+using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Trips;
 using SwiftRide.MatchingService.Application.DTOs;
 using SwiftRide.MatchingService.Application.Interfaces;
@@ -30,13 +31,53 @@ public class TripRequestedConsumer : IConsumer<TripRequestedV1>
             throw new ArgumentException("TripRequestedV1 cần TripId và tọa độ điểm đón hợp lệ.");
         }
 
-        // ponytail: dùng bán kính 5 km như API /match; thêm cấu hình khi cần thay đổi theo khu vực.
-        var request = new MatchRequest(message.TripId.ToString(),
-            message.PickupLatitude.Value, message.PickupLongitude.Value, 5);
+        // Mặc định bán kính 5 km như API /match.
+        var request = new MatchRequest(
+            message.TripId.ToString(),
+            message.PickupLatitude.Value,
+            message.PickupLongitude.Value,
+            5);
         var result = await _matching.MatchAsync(request, context.CancellationToken);
 
-        // ponytail: chỉ tìm ứng viên và ghi log; thêm event kết quả khi chốt luồng chọn/nhận chuyến.
-        _logger.LogInformation("Đã nhận chuyến {TripId}, tìm thấy {DriverCount} tài xế gần điểm đón",
-            message.TripId, result.Drivers.Count);
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation("Đã nhận chuyến {TripId}, tìm thấy {DriverCount} tài xế gần điểm đón",
+                message.TripId, result.Drivers.Count);
+        }
+
+        // TH1: Tìm thấy tài xế -> Chọn tài xế gần nhất và Publish DriverMatchedV1
+        if (result.Drivers.Count > 0)
+        {
+            var bestDriver = result.Drivers[0];
+
+            if (!Guid.TryParse(bestDriver.DriverId, out var driverGuid))
+            {
+                driverGuid = Guid.NewGuid();
+            }
+
+            await context.Publish(new DriverMatchedV1
+            {
+                CorrelationId = message.CorrelationId,
+                TripId = message.TripId,
+                DriverId = driverGuid,
+                OccurredAtUtc = DateTimeOffset.UtcNow
+            }, context.CancellationToken);
+
+            _logger.LogInformation("Đã bắn event DriverMatchedV1 cho Trip {TripId} với tài xế {DriverId}",
+                message.TripId, driverGuid);
+        }
+        // TH2: Không có tài xế trong bán kính -> Publish DriverMatchFailedV1
+        else
+        {
+            await context.Publish(new DriverMatchFailedV1
+            {
+                CorrelationId = message.CorrelationId,
+                TripId = message.TripId,
+                Reason = "Không tìm thấy tài xế khả dụng gần điểm đón.",
+                OccurredAtUtc = DateTimeOffset.UtcNow
+            }, context.CancellationToken);
+
+            _logger.LogWarning("Không tìm thấy tài xế cho Trip {TripId}, đã bắn DriverMatchFailedV1", message.TripId);
+        }
     }
 }
