@@ -6,6 +6,9 @@ public interface IPaymentApplicationService
 {
     Task<PaymentResponse> CreatePaymentAsync(
         CreatePaymentRequest request, CancellationToken cancellationToken = default);
+    Task<PaymentResponse> ProcessPaymentCommandAsync(
+        CreatePaymentRequest request,
+        CancellationToken cancellationToken = default);
     Task<PaymentResponse?> GetPaymentByIdAsync(
         Guid paymentId, CancellationToken cancellationToken = default);
     Task<PaymentResponse?> GetPaymentByTripIdAsync(

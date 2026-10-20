@@ -560,4 +560,105 @@ public sealed class PaymentApplicationServiceTests
         Assert.Equal(latest.Id, result.Id);
         _repo.Verify(x => x.GetByIdAsync(stale.Id, It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
+
+
+    [Fact]
+    public async Task ProcessCommand_NewPayment_ShouldNotCallTripService()
+    {
+        var (request, _) = NewRequest();
+
+        var result = await _service.ProcessPaymentCommandAsync(
+            request,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            PaymentStatus.Succeeded.ToString(),
+            result.Status);
+
+        Assert.False(result.IsTripSynced);
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.Is<IEnumerable<LedgerEntry>>(
+                entries => entries.Count() == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _trip.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_ExistingKey_ShouldReturnSamePayment()
+    {
+        var (request, _) = NewRequest();
+
+        var existing = Payment.Create(
+            request.TripId,
+            request.Amount,
+            request.IdempotencyKey,
+            request.PayerAccount,
+            request.PayeeAccount);
+
+        existing.MarkSucceeded();
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        var result = await _service.ProcessPaymentCommandAsync(
+            request,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(existing.Id, result.Id);
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.IsAny<IEnumerable<LedgerEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _trip.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_SameTripDifferentKey_ShouldReject()
+    {
+        var (request, _) = NewRequest();
+
+        var existing = Payment.Create(
+            request.TripId,
+            request.Amount,
+            "different-original-key",
+            request.PayerAccount,
+            request.PayeeAccount);
+
+        existing.MarkSucceeded();
+
+        _repo.Setup(x => x.GetSettledByTripIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ProcessPaymentCommandAsync(
+                request,
+                TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _trip.VerifyNoOtherCalls();
+    }
 }

@@ -16,5 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/PaymentService/PaymentService.csproj" />
+    <ProjectReference Include="../../src/SwiftRide.Contracts/SwiftRide.Contracts.csproj" />
   </ItemGroup>
 </Project>
