@@ -124,4 +124,19 @@ npm run export:android
 
 Test bao phủ luồng Rider/Driver, offline, địa điểm không hợp lệ, chuyển trạng thái, hủy, giới hạn từ chối/retry, chống settle lặp, snapshot hỏng/khác app, đăng nhập demo riêng và cấu hình hai ứng dụng.
 
+`tests/ui.test.mjs` thêm kiểm tra component bằng React/React DOM thật, React Native Web và jsdom (chỉ dev dependency), chạy trong `npm test`. TypeScript có sẵn chuyển TSX khi chạy test; không sinh file build. AsyncStorage, SVG và safe-area được thay bằng test doubles. Test bao phủ bấm lặp, khóa/loading, tác vụ thất bại và thử lại, giữ form đăng nhập, ẩn/hiện mật khẩu, nút theo vai trò/trạng thái, xác nhận trả khách, lỗi đọc không ghi đè dữ liệu, lỗi lưu/thử lưu, thứ tự ghi và unmount khi đang đọc.
+
+jsdom không có layout engine hoặc bàn phím native; cảnh báo thiếu ResizeObserver trong test không phải bằng chứng lỗi bố cục. Các test này không chứng minh safe area, VoiceOver, Dynamic Type hoặc trải nghiệm iPhone thật đã đạt.
+
+### Checklist nghiệm thu UI trên thiết bị
+
+- [ ] iPhone thật: mở bàn phím ở đăng nhập/tìm địa điểm; trường đang nhập và nút đóng vẫn truy cập được, không mất dữ liệu khi đóng bàn phím.
+- [ ] Safe area: thử máy có notch/home indicator và xoay ngang; nút chính, tab và sheet không bị che.
+- [ ] Chữ lớn: tăng cỡ chữ hệ thống, kiểm tra tên địa điểm dài, giá, nút xác nhận và thông báo lỗi; nội dung cuộn được, không cắt chữ.
+- [ ] VoiceOver/TalkBack: tên nút rõ, đọc được lỗi và trạng thái đang bận, focus không thoát khỏi sheet đang mở.
+- [ ] Android Back: đóng sheet trước, từ tài khoản về chuyến, từ báo giá về sửa hành trình; thoát không tự hủy chuyến.
+- [ ] Đóng/mở lại app ở chuyến đang chạy hoặc thanh toán chờ: giữ đúng chuyến, không tự chuyển thành đã thanh toán.
+
+Kiểm tra browser ngày 21/10/2026: nút xác nhận Rider nằm trong viewport ở 320/390/430 × 568, không tràn ngang; sheet tìm địa điểm có trạng thái không tìm thấy ở 320 × 568. Đây là kiểm tra web, không đánh dấu thay các mục native phía trên.
+
 `npm audit` ngày 12/10/2026 còn báo cảnh báo phụ thuộc gián tiếp của Expo/Metro (gồm `braces`, `node-forge`, `uuid`). Registry chưa có bản sửa tương thích cho toàn bộ chuỗi; không dùng `npm audit fix --force` để hạ Expo/React Native sang major cũ. Chưa đánh giá khả năng khai thác cho bản phát hành; rà soát lại trước khi deploy/build phân phối. Không đưa dev server ra Internet.

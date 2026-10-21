@@ -27,7 +27,7 @@ const iconPaths = {
 };
 export type IconName = keyof typeof iconPaths;
 export function Icon({ name, color = palette.teal, size = 22 }: { name: IconName; color?: string; size?: number }) {
-  return <Svg width={size} height={size} viewBox="0 0 24 24" accessible={false}><Path d={iconPaths[name]} fill="none" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" /></Svg>;
+  return <Svg width={size} height={size} viewBox="0 0 24 24" {...(Platform.OS === 'web' ? { 'aria-hidden': true } : { accessible: false })}><Path d={iconPaths[name]} fill="none" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" /></Svg>;
 }
 
 export function Button({ title, onPress, variant = 'primary', disabled = false, busy = false, icon }: {
@@ -54,7 +54,7 @@ export function Button({ title, onPress, variant = 'primary', disabled = false, 
       setPending(false);
     }
   }
-  return <><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: blocked, busy: loading }} disabled={blocked} onPress={press}
+  return <><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: blocked, busy: loading }} aria-busy={loading} disabled={blocked} onPress={press}
     style={({ pressed }) => [styles.button, variant === 'primary' ? styles.primary : styles.secondary, blocked && { opacity: 0.45 }, pressed && { opacity: 0.75 }]}>
     <T style={[styles.buttonText, { color: variant === 'primary' ? palette.white : variant === 'danger' ? palette.coral : palette.teal }]}>{title}</T>
     {loading ? <ActivityIndicator accessibilityLabel="Đang xử lý" color={variant === 'primary' ? palette.white : palette.teal} /> : icon && <Icon name={icon} color={variant === 'primary' ? palette.white : palette.teal} size={20} />}
@@ -105,7 +105,7 @@ export function CityMap({ trip }: { trip: Trip }) {
   const pickup = positions[trip.pickup];
   const destination = positions[trip.destination];
   return <View accessibilityRole="image" accessibilityLabel={`Bản đồ minh họa. Điểm đón ${findPlace(trip.pickup).name}${destination ? `, điểm đến ${findPlace(trip.destination).name}` : ''}. Không theo dõi GPS.`} style={styles.map}>
-    <Svg width="100%" height={220} viewBox="0 0 360 220" accessible={false}>
+    <Svg width="100%" height={220} viewBox="0 0 360 220" {...(Platform.OS === 'web' ? { 'aria-hidden': true } : { accessible: false })}>
       <Rect width={360} height={220} fill="#E9EEE5" />
       {[18, 80, 142, 204, 266, 328].map(horizontal => [15, 76, 137, 198].map(vertical => <Rect key={`${horizontal}-${vertical}`} x={horizontal} y={vertical} width={46} height={42} rx={9} fill="#DFE6DC" />))}
       <Path d="M342-20C285 45 360 75 336 135S285 170 330 250" fill="none" stroke="#BEDDDC" strokeWidth={37} />
