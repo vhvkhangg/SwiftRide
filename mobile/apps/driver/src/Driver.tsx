@@ -22,16 +22,13 @@ export default function Driver(props: TripScreenProps) {
       <Card><View style={styles.row}><View style={styles.avatar}><Icon name="bike" size={27} /></View><View style={styles.flex}><Eyebrow>LỜI MỜI MỚI</Eyebrow><Title>Chuyến đi gần bạn.</Title></View></View>
         {trip.attempts > 0 && <Note warning>Đã từ chối {trip.attempts}/3 lần. Đây là lời mời tiếp theo trong kịch bản mô phỏng.</Note>}
         <Person /><Route trip={trip} /><View style={styles.divider} /><View style={styles.row}><Metric value={`${fare.distance} km`} label="Quãng đường mẫu" /><Metric value={`${fare.minutes} phút`} label="Thời gian mẫu" /></View><T style={styles.caption}>GIÁ TRỊ CHUYẾN · CHƯA TRỪ PHÍ</T><T style={styles.fare}>{money(fare.fare)}</T>
-        <Button title="Nhận chuyến" icon="check" onPress={() => dispatch({ type: 'accept' })} /><Button title="Từ chối lời mời" variant="danger" onPress={() => confirm('Từ chối lời mời?', 'Kịch bản sẽ thử lời mời tiếp theo, tối đa 3 lần.', () => dispatch({ type: 'reject' }))} />
+        <Button title="Từ chối lời mời" variant="danger" onPress={() => confirm('Từ chối lời mời?', 'Kịch bản sẽ thử lời mời tiếp theo, tối đa 3 lần.', () => dispatch({ type: 'reject' }))} />
       </Card>
     </>}
     {['accepted', 'enroute', 'pickedup'].includes(trip.status) && <>
       <Card><Eyebrow>{tripId(trip)} · {statusLabels[trip.status].toUpperCase()}</Eyebrow><Title>{trip.status === 'pickedup' ? 'Đưa khách đến nơi.' : trip.status === 'accepted' ? 'Bạn đã nhận chuyến.' : 'Đang đi đón khách.'}</Title><Person /><Route trip={trip} /><View style={styles.divider} />
         <View style={styles.row}><Metric value={`${fare.minutes} phút`} label="Thời gian mẫu" /><Metric value={money(fare.fare)} label="Giá chuyến mẫu" /></View>
         <Note>{trip.status === 'pickedup' ? 'Chỉ xác nhận trả khách khi đã kết thúc hành trình.' : 'Đối chiếu thông tin hành khách trước khi xác nhận đón.'}</Note>
-        {trip.status === 'accepted' && <Button title="Bắt đầu đi đón" icon="arrow" onPress={() => dispatch({ type: 'depart' })} />}
-        {trip.status === 'enroute' && <Button title="Đã đón khách" icon="check" onPress={() => confirm('Đã đón khách?', 'Xác nhận hành khách đã lên xe. Chuyến sẽ chuyển sang đang di chuyển.', () => dispatch({ type: 'pickup' }))} />}
-        {trip.status === 'pickedup' && <Button title="Đã trả khách" icon="check" onPress={() => confirm('Đã trả khách?', 'Xác nhận khách đã đến nơi. Thanh toán được xử lý riêng, chưa coi là đã thu tiền.', () => dispatch({ type: 'dropoff' }))} />}
         {trip.status !== 'pickedup' && <Button title="Hủy chuyến" variant="danger" onPress={() => confirm('Hủy chuyến?', 'Chuyến demo sẽ kết thúc. Chỉ cho hủy trước khi đón khách.', () => dispatch({ type: 'cancel' }))} />}
       </Card>
     </>}

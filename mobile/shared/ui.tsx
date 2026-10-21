@@ -1,5 +1,6 @@
+import { useRef, useState } from 'react';
 import type { PropsWithChildren } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { TextProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect, Text as SvgText } from 'react-native-svg';
@@ -29,14 +30,35 @@ export function Icon({ name, color = palette.teal, size = 22 }: { name: IconName
   return <Svg width={size} height={size} viewBox="0 0 24 24" accessible={false}><Path d={iconPaths[name]} fill="none" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" /></Svg>;
 }
 
-export function Button({ title, onPress, variant = 'primary', disabled = false, icon }: {
-  title: string; onPress: () => void; variant?: 'primary' | 'secondary' | 'danger'; disabled?: boolean; icon?: IconName;
+export function Button({ title, onPress, variant = 'primary', disabled = false, busy = false, icon }: {
+  title: string; onPress: () => void | Promise<void>; variant?: 'primary' | 'secondary' | 'danger'; disabled?: boolean; busy?: boolean; icon?: IconName;
 }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
-    style={({ pressed }) => [styles.button, variant === 'primary' ? styles.primary : styles.secondary, disabled && { opacity: 0.45 }, pressed && { opacity: 0.75 }]}>
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const running = useRef(false);
+  const lastPress = useRef(0);
+  const loading = busy || pending;
+  const blocked = disabled || loading;
+  async function press() {
+    if (blocked || running.current || Date.now() - lastPress.current < 350) return;
+    lastPress.current = Date.now();
+    running.current = true;
+    setError('');
+    try {
+      const result = onPress();
+      if (result) { setPending(true); await result; }
+    } catch {
+      setError('Không thực hiện được thao tác. Dữ liệu nhập vẫn giữ nguyên; vui lòng thử lại.');
+    } finally {
+      running.current = false;
+      setPending(false);
+    }
+  }
+  return <><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: blocked, busy: loading }} disabled={blocked} onPress={press}
+    style={({ pressed }) => [styles.button, variant === 'primary' ? styles.primary : styles.secondary, blocked && { opacity: 0.45 }, pressed && { opacity: 0.75 }]}>
     <T style={[styles.buttonText, { color: variant === 'primary' ? palette.white : variant === 'danger' ? palette.coral : palette.teal }]}>{title}</T>
-    {icon && <Icon name={icon} color={variant === 'primary' ? palette.white : palette.teal} size={20} />}
-  </Pressable>;
+    {loading ? <ActivityIndicator accessibilityLabel="Đang xử lý" color={variant === 'primary' ? palette.white : palette.teal} /> : icon && <Icon name={icon} color={variant === 'primary' ? palette.white : palette.teal} size={20} />}
+  </Pressable>{!!error && <T accessibilityRole="alert" style={{ color: palette.coral }}>{error}</T>}</>;
 }
 
 export function Card({ children }: PropsWithChildren) { return <View style={styles.card}>{children}</View>; }

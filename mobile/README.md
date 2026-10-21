@@ -14,6 +14,24 @@ Mật khẩu demo: `demo1234`. Nút điền tài khoản chỉ điền form; c�
 
 ## Chạy trên điện thoại
 
+### Chế độ demo / API
+
+Mặc định `EXPO_PUBLIC_APP_MODE=demo`. Nút chính nằm cố định phía trên thanh tab; lỗi lưu chuyến có nút thử lưu lại, không cần thao tác lại chuyến. Các nút chặn bấm nhanh liên tiếp và hỗ trợ trạng thái chờ cho tác vụ bất đồng bộ.
+
+Để chuẩn bị môi trường API, đặt biến môi trường trước khi chạy Expo (áp dụng riêng cho mỗi terminal):
+
+```powershell
+$env:EXPO_PUBLIC_APP_MODE = 'api'
+$env:EXPO_PUBLIC_GATEWAY_URL = 'http://localhost:5000'
+npm run preview:rider
+```
+
+URL trên chỉ là ví dụ; dùng địa chỉ Gateway của môi trường thực tế. Trên điện thoại, `localhost` là điện thoại, không phải máy chạy BE. Không đặt token hoặc bí mật vào biến `EXPO_PUBLIC_*`.
+
+**API hiện bị chặn có chủ đích:** chỉ hiện thông báo chưa tích hợp, không mở đăng nhập demo, đọc/ghi chuyến demo hoặc hiện nút mô phỏng. Chưa có Auth thật hoặc endpoint nghiệp vụ được nối. Sai mode/URL cũng bị chặn thay vì âm thầm quay về demo. Đổi cấu hình cần khởi động lại Expo. Để quay lại demo: `$env:EXPO_PUBLIC_APP_MODE = 'demo'`.
+
+`shared/gateway.ts` tập trung request, timeout, hủy và lỗi HTTP/mạng; không tự retry, không suy đoán endpoint/response nghiệp vụ. Kết quả JSON là `unknown`, cần kiểm tra theo contract khi tích hợp. Không báo thành công sau timeout; xác minh chuyến/giao dịch trước khi gửi lại. Module này chưa được gọi từ màn demo.
+
 Yêu cầu Node.js >= 22.13, npm và Expo Go tương thích SDK 57. Cài dependencies **một lần tại thư mục `mobile/`**, không cài riêng từng app.
 
 ```powershell
