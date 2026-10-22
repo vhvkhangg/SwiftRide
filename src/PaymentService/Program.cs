@@ -8,13 +8,42 @@ using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Api.Endpoints;
 using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Infrastructure.Clients;
+using MassTransit;
+using SwiftRide.PaymentService.Application.Consumers;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSwiftRideMessaging(builder.Configuration, "payment");
-
 builder.Services.AddDbContext<PaymentDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("PaymentDb")));
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("PaymentDb")));
+
+builder.Services.AddSwiftRideMessaging(
+    builder.Configuration,
+    "payment",
+    registerConsumers: x =>
+    {
+        x.AddConsumer<ProcessPaymentConsumer>()
+            .Endpoint(e =>
+            {
+                e.Name = MessagingEndpoints.PaymentProcessPayment;
+            });
+
+        x.AddEntityFrameworkOutbox<PaymentDbContext>(o =>
+        {
+            o.UsePostgres();
+
+            o.DuplicateDetectionWindow = TimeSpan.FromHours(24);
+        });
+
+        x.AddConfigureEndpointsCallback((context, name, endpoint) =>
+        {
+            if (name == MessagingEndpoints.PaymentProcessPayment)
+            {
+                endpoint.UseEntityFrameworkOutbox<PaymentDbContext>(
+                    context);
+            }
+        });
+    });
 
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 

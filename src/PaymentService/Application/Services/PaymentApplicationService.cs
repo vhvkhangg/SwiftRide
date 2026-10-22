@@ -82,7 +82,8 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         var payment = await StoreNewPaymentAsync(
             request,
-            cancellationToken
+            cancellationToken,
+            recoverUniqueViolation: false
         );
 
         return PaymentResponse.From(payment);
@@ -163,7 +164,9 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
     private async Task<Payment> StoreNewPaymentAsync(
         CreatePaymentRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool recoverUniqueViolation = true
+    )
     {
         var payment = Payment.Create(
             request.TripId,
@@ -200,7 +203,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
             return payment;
         }
-        catch (DuplicateIdempotencyKeyException)
+        catch (DuplicateIdempotencyKeyException) when (recoverUniqueViolation)
         {
             var winner = await _payments.GetByIdempotencyKeyAsync(request.IdempotencyKey, ct);
 
@@ -215,7 +218,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
             return winner;
         }
-        catch (TripAlreadyPaidException ex)
+        catch (TripAlreadyPaidException ex) when(recoverUniqueViolation)
         {
             throw new InvalidOperationException(
                 "Trip vừa được thanh toán bởi request khác.",

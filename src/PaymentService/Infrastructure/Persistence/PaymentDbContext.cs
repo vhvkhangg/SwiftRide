@@ -1,3 +1,4 @@
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Domain.Entities;
 
@@ -19,5 +20,9 @@ public sealed class PaymentDbContext : DbContext
         modelBuilder.ApplyConfigurationsFromAssembly(
             typeof(PaymentDbContext).Assembly
         );
+
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
+        modelBuilder.AddOutboxStateEntity();
     }
 }
