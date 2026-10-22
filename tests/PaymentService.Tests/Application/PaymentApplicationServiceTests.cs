@@ -661,4 +661,23 @@ public sealed class PaymentApplicationServiceTests
 
         _trip.VerifyNoOtherCalls();
     }
+
+
+    [Fact]
+    public async Task ProcessCommand_ConcurrentDuplicateKey_ShouldPropagate()
+    {
+        var (request, _) = NewRequest();
+
+        _repo.Setup(x => x.SaveChangesAsync(
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DuplicateIdempotencyKeyException(
+                new Exception("Simulated unique violation")));
+
+        await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(
+            () => _service.ProcessPaymentCommandAsync(
+                request,
+                TestContext.Current.CancellationToken));
+
+        _trip.VerifyNoOtherCalls();
+    }
 }
