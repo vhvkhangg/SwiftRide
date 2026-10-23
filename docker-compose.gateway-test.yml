@@ -1,0 +1,40 @@
+# Local Auth tests only. Credentials below are disposable test values.
+# Run independently: docker compose -f docker-compose.gateway-test.yml up --build -d
+name: swiftride-gateway-test
+
+services:
+  auth-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: swiftride_auth
+      POSTGRES_USER: swiftride
+      POSTGRES_PASSWORD: gateway_test_password
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - auth-test-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swiftride -d swiftride_auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/ApiGateway/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Development
+      AuthDatabase__EnsureCreated: "true"
+      ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=gateway_test_password
+      # Public test key only; never use it in production.
+      JwtSettings__SecretKey: swiftride-local-test-only-signing-key-at-least-32-bytes-2026
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5100:8080"
+
+volumes:
+  auth-test-data:

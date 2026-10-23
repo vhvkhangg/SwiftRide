@@ -7,9 +7,11 @@ using Microsoft.Extensions.Options;
 using SwiftRide.ApiGateway.Auth;
 using SwiftRide.ApiGateway.Data;
 using SwiftRide.ApiGateway.Proxy;
-using Yarp.ReverseProxy.Transforms;
+using Ocelot.DependencyInjection;
+using Ocelot.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("ocelot.json", optional: false, reloadOnChange: false).AddEnvironmentVariables();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddControllers();
@@ -24,9 +26,8 @@ builder.Services.AddSingleton<DummyPasswordHash>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.Configure<PasswordHasherOptions>(x => x.IterationCount = 210_000);
 builder.Services.AddDbContext<AuthDbContext>(options =>
-    options.UseMySql(builder.Configuration.GetConnectionString("AuthDb")
-        ?? throw new InvalidOperationException("ConnectionStrings:AuthDb is required."),
-        new MySqlServerVersion(new Version(8, 4, 0))));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("AuthDb")
+        ?? throw new InvalidOperationException("ConnectionStrings:AuthDb is required.")));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
 builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
@@ -51,27 +52,33 @@ builder.Services.AddRateLimiter(options =>
             AutoReplenishment = true
         }));
 });
-builder.Services.AddReverseProxy()
-    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddTransforms(context => context.AddRequestTransform(IdentityHeaders.Enrich));
-
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddOcelot(builder.Configuration)
+    .AddDelegatingHandler<IdentityHeaders>(global: true);
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
-app.UseRouting();
-app.UseAuthentication();
-app.UseAuthorization();
-app.UseRateLimiter();
-app.MapControllers(); // /auth/* terminates here; it is never proxied.
-app.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "ok" })).AllowAnonymous();
-app.MapReverseProxy();
-
+app.MapWhen(context => context.Request.Path.StartsWithSegments("/auth") ||
+    context.Request.Path.StartsWithSegments("/health"), local =>
+{
+    local.UseRouting();
+    local.UseAuthentication();
+    local.UseAuthorization();
+    local.UseRateLimiter();
+    local.UseEndpoints(endpoints =>
+    {
+        endpoints.MapControllers();
+        endpoints.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "ok" }))
+            .AllowAnonymous();
+    });
+});
 // Development bootstrap only. Production uses reviewed EF migrations.
 if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
 {
     await using var scope = app.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
 }
-app.Run();
+await app.UseOcelot();
+await app.RunAsync();
 
 public partial class Program { }
