@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Dispatch, ReactNode } from 'react';
+import type { ComponentRef, Dispatch, ReactNode } from 'react';
 import { ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -34,7 +34,7 @@ function AppContent({ role, screens, renderTrip }: Props) {
   const [tab, setTab] = useState<'trip' | 'account'>('trip');
   const [showDemo, setShowDemo] = useState(false);
   const [confirmation, setConfirmation] = useState<{ title: string; message: string; accept: () => void } | null>(null);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   const confirm: Confirm = (title, message, accept) => { setConfirmation({ title, message, accept }); setShowDemo(true); };
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [trip.status, tab]);
   useEffect(() => {

@@ -32,7 +32,7 @@ URL trên chỉ là ví dụ; dùng địa chỉ Gateway của môi trường th
 
 `shared/gateway.ts` tập trung request, timeout, hủy và lỗi HTTP/mạng; không tự retry, không suy đoán endpoint/response nghiệp vụ. Kết quả JSON là `unknown`, cần kiểm tra theo contract khi tích hợp. Không báo thành công sau timeout; xác minh chuyến/giao dịch trước khi gửi lại. Module này chưa được gọi từ màn demo.
 
-Yêu cầu Node.js >= 22.13, npm và Expo Go tương thích SDK 57. Cài dependencies **một lần tại thư mục `mobile/`**, không cài riêng từng app.
+Yêu cầu Node.js >= 22.13, npm và Expo Go tương thích SDK 58. Cài dependencies **một lần tại thư mục `mobile/`**, không cài riêng từng app.
 
 ```powershell
 cd E:\SwiftRide\mobile
