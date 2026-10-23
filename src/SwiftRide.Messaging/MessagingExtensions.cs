@@ -12,7 +12,8 @@ public static class MessagingExtensions
         IConfiguration configuration,
         string serviceName,
         Action<IBusRegistrationConfigurator>? registerConsumers = null,
-        Action<IRabbitMqBusFactoryConfigurator>? configureBus = null)
+        Action<IRabbitMqBusFactoryConfigurator>? configureBus = null,
+        Action<IRetryConfigurator>? configureRetry = null)
     {
         var settings = configuration.GetSection("RabbitMq").Get<RabbitMqSettings>();
 
@@ -49,18 +50,16 @@ public static class MessagingExtensions
             x.SetEndpointNameFormatter(new KebabCaseEndpointNameFormatter(
                 "swiftride-" + serviceName, false));
 
-            // NV1–NV3 đăng ký consumer nghiệp vụ của mình qua tham số này.
-            if (registerConsumers != null)
-            {
-                registerConsumers(x);
-            }
-
             x.AddConfigureEndpointsCallback((name, endpoint) =>
             {
                 endpoint.UseMessageRetry(retry =>
                 {
                     // Dữ liệu không hợp lệ không được thử lại.
                     retry.Ignore<ArgumentException>();
+
+                    // Cho phép từng service loại trừ lỗi nghiệp vụ riêng.
+                    configureRetry?.Invoke(retry);
+
                     retry.Intervals(
                         TimeSpan.FromSeconds(1),
                         TimeSpan.FromSeconds(3),
@@ -83,6 +82,12 @@ public static class MessagingExtensions
 
                 // MassTransit tự chuyển lỗi vào _error, sai loại message vào _skipped.
             });
+
+            // NV1–NV3 đăng ký consumer nghiệp vụ của mình qua tham số này.
+            if (registerConsumers != null)
+            {
+                registerConsumers(x);
+            }
 
             x.UsingRabbitMq((context, bus) =>
             {

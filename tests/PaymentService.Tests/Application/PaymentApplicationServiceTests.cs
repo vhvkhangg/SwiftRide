@@ -7,6 +7,7 @@ using SwiftRide.PaymentService.Domain.Enums;
 using SwiftRide.PaymentService.Domain.Exceptions;
 using SwiftRide.PaymentService.Domain.Repositories;
 using Xunit;
+using SwiftRide.PaymentService.Application.Exceptions;
 
 namespace SwiftRide.PaymentService.Tests.Application;
 
@@ -650,7 +651,7 @@ public sealed class PaymentApplicationServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(existing);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(
             () => _service.ProcessPaymentCommandAsync(
                 request,
                 TestContext.Current.CancellationToken));
@@ -678,6 +679,115 @@ public sealed class PaymentApplicationServiceTests
                 request,
                 TestContext.Current.CancellationToken));
 
+        _trip.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_SameKeyDifferentAmount_ShouldReject()
+    {
+        var (request, _) = NewRequest();
+
+        var existing = Payment.Create(
+        request.TripId,
+        request.Amount + 1000m,
+        request.IdempotencyKey,
+        request.PayerAccount,
+        request.PayeeAccount);
+        existing.MarkSucceeded();
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+        request.IdempotencyKey,
+        It.IsAny<CancellationToken>()))
+        .ReturnsAsync(existing);
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(
+        () => _service.ProcessPaymentCommandAsync(
+        request,
+        TestContext.Current.CancellationToken));
+        _repo.Verify(x => x.AddAsync(
+        It.IsAny<Payment>(),
+        It.IsAny<CancellationToken>()), Times.Never);
+        _trip.VerifyNoOtherCalls();
+    }
+    [Fact]
+    public async Task ProcessCommand_SameKeyRefunded_ShouldReject()
+    {
+        var (request, _) = NewRequest();
+        var existing = Payment.Create(
+        request.TripId,
+        request.Amount,
+        request.IdempotencyKey,
+        request.PayerAccount,
+        request.PayeeAccount);
+        existing.MarkSucceeded();
+        existing.Refund();
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+        request.IdempotencyKey,
+        It.IsAny<CancellationToken>()))
+        .ReturnsAsync(existing);
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(
+        () => _service.ProcessPaymentCommandAsync(
+        request,
+        TestContext.Current.CancellationToken));
+        _repo.Verify(x => x.SaveChangesAsync(
+        It.IsAny<CancellationToken>()), Times.Never);
+    }
+    [Fact]
+    public async Task ProcessCommand_RefundedTripDifferentKey_ShouldReject()
+    {
+        var (request, _) = NewRequest();
+        var existing = Payment.Create(
+        request.TripId,
+        request.Amount,
+        "original-key",
+        request.PayerAccount,
+        request.PayeeAccount);
+        existing.MarkSucceeded();
+        existing.Refund();
+        _repo.Setup(x => x.GetSettledByTripIdAsync(
+        request.TripId,
+        It.IsAny<CancellationToken>()))
+        .ReturnsAsync(existing);
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(
+        () => _service.ProcessPaymentCommandAsync(
+        request,
+        TestContext.Current.CancellationToken));
+        _repo.Verify(x => x.AddAsync(
+        It.IsAny<Payment>(),
+        It.IsAny<CancellationToken>()), Times.Never);
+    }
+    [Fact]
+    public async Task ProcessCommand_AfterDuplicateConflict_ShouldReuseWinner()
+    {
+        var (request, _) = NewRequest();
+        var winner = Payment.Create(
+        request.TripId,
+        request.Amount,
+        request.IdempotencyKey,
+        request.PayerAccount,
+        request.PayeeAccount);
+        winner.MarkSucceeded();
+        _repo.SetupSequence(x => x.GetByIdempotencyKeyAsync(
+        request.IdempotencyKey,
+        It.IsAny<CancellationToken>()))
+        .ReturnsAsync((Payment?)null)
+        .ReturnsAsync(winner);
+        _repo.Setup(x => x.SaveChangesAsync(
+        It.IsAny<CancellationToken>()))
+        .ThrowsAsync(new DuplicateIdempotencyKeyException(
+        new Exception("Simulated concurrent insert")));
+        await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(
+        () => _service.ProcessPaymentCommandAsync(
+        request,
+        TestContext.Current.CancellationToken));
+        var retry = await _service.ProcessPaymentCommandAsync(
+        request,
+        TestContext.Current.CancellationToken);
+        Assert.Equal(winner.Id, retry.Id);
+        Assert.Equal("Succeeded", retry.Status);
+        _repo.Verify(x => x.AddAsync(
+        It.IsAny<Payment>(),
+        It.IsAny<CancellationToken>()), Times.Once);
+        _repo.Verify(x => x.SaveChangesAsync(
+        It.IsAny<CancellationToken>()), Times.Once);
         _trip.VerifyNoOtherCalls();
     }
 }

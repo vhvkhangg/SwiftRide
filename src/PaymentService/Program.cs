@@ -10,6 +10,8 @@ using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Infrastructure.Clients;
 using MassTransit;
 using SwiftRide.PaymentService.Application.Consumers;
+using SwiftRide.PaymentService.Application.Exceptions;
+using SwiftRide.PaymentService.Domain.Exceptions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,7 +45,14 @@ builder.Services.AddSwiftRideMessaging(
                     context);
             }
         });
-    });
+    },
+    configureRetry: retry =>
+    {
+        retry.Ignore<PaymentCommandRejectedException>();
+
+        retry.Ignore<TripAlreadyPaidException>();
+    }
+);
 
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 
