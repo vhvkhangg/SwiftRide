@@ -32,7 +32,7 @@ if ($me.roles -notcontains "Rider" -or $me.roles -contains "Admin") { throw "Pub
 $driverMe = Call GET "/auth/me" $null $driver 200
 
 $null = Call POST "/api/trips/" @{pickupAddress="A";dropoffAddress="B";fareEstimate=100} "" 401
-$trip = Call POST "/api/trips/" @{riderId=[guid]::NewGuid().ToString();pickupAddress="A";dropoffAddress="B";fareEstimate=100} $rider 201
+$trip = Call POST "/api/trips/" @{riderId=[guid]::NewGuid().ToString();pickupAddress="A";dropoffAddress="B";fareEstimate=100;pickupLatitude=10.77;pickupLongitude=106.69} $rider 201
 if ($trip.riderId -ne $me.id) { throw "RiderId trusted from body." }
 $id = $trip.id
 $null = Call GET "/api/trips/$id" $null $rider 200
@@ -46,8 +46,6 @@ $null = Call POST "/api/matching/quote" @{distance=2;estimatedTime=5;surge=1} $r
 $null = Call POST "/api/matching/match" @{tripId=$id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $other 403
 $matched = Call POST "/api/matching/match" @{tripId=$id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $rider 200
 if ($matched.drivers.driverId -notcontains $driverMe.id) { throw "Driver not returned by Matching." }
-$invitations = Call GET "/api/trips/invitations" $null $driver 200
-if ($invitations.tripId -notcontains $id) { throw "Invitation missing." }
 $null = Call POST "/api/trips/$id/driver-accept" @{driverId=[guid]::NewGuid().ToString()} $driver 204
 $accepted = Call GET "/api/trips/$id" $null $driver 200
 if ($accepted.driverId -ne $driverMe.id) { throw "Accept used body DriverId." }
@@ -68,13 +66,13 @@ $null = Call GET "/api/payments/$($payment.id)" $null $rider 200
 $null = Call GET "/api/payments/trip/$id" $null $other 403
 $null = Call POST "/api/payments/$($payment.id)/refund" @{} $rider 403
 $null = Call GET "/internal/trips/$id" $null $rider 404
-$cancelTrip = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100} $rider 201
+$cancelTrip = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100;pickupLatitude=10.77;pickupLongitude=106.69} $rider 201
 $null = Call POST "/api/trips/$($cancelTrip.id)/cancel" @{} $rider 204
 $null = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100} $driver 403
 
 # Two invited drivers race for the same trip: only one can win.
 $null = Call POST "/api/drivers/location" @{latitude=10.77;longitude=106.69;isAvailable=$true} $driverOther 200
-$raceTrip = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100} $rider 201
+$raceTrip = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100;pickupLatitude=10.77;pickupLongitude=106.69} $rider 201
 $null = Call POST "/api/matching/match" @{tripId=$raceTrip.id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $rider 200
 $jobs = @($driver,$driverOther) | ForEach-Object {
     Start-Job -ArgumentList "$BaseUrl/api/trips/$($raceTrip.id)/driver-accept", $_ -ScriptBlock {

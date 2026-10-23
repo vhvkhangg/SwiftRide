@@ -17,11 +17,22 @@ public static class ServiceSecurity
         var audience = config["JwtSettings:Audience"] ?? throw new InvalidOperationException("JWT audience required.");
         var key = Key(config, "JwtSettings:SecretKey");
         var internalKey = Key(config, "ServiceAuth:SecretKey");
+        if (key.SequenceEqual(internalKey))
+            throw new InvalidOperationException("User and service signing keys must differ.");
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
                 options.MapInboundClaims = false;
                 options.TokenValidationParameters = Parameters(key, issuer, audience);
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = context =>
+                    {
+                        if (!Guid.TryParse(context.Principal?.FindFirstValue("sub"), out var userId) || userId == Guid.Empty)
+                            context.Fail("Invalid subject.");
+                        return Task.CompletedTask;
+                    }
+                };
             })
             .AddJwtBearer("Service", options =>
             {

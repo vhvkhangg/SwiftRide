@@ -2,6 +2,17 @@
 
 Nhánh: van. Kiểm tra theo checklist định tuyến, phân quyền Rider/Driver và xác thực downstream.
 
+## Kiểm tra lại sau merge trên khanh — 23/10/2026
+
+- Đã sửa conflict ở project/config/docs, bổ sung shared security cho Matching, anchor secrets và volume RabbitMQ trong Compose.
+- Đã gắn TripAccessFilter, giới hạn tạo chuyến cho Rider và lấy RiderId từ JWT. User JWT phải có sub là GUID khác rỗng; user/service signing keys phải khác nhau.
+- Build solution thành công. Test solution: 105 passed, 0 failed, 7 skipped vì chưa cấu hình database/broker integration.
+- TripSecurityTests chạy HTTP trên Kestrel với application service giả, kiểm tra role, danh tính từ JWT, token sai/hết hạn và cách ly service token; không xác nhận ownership bằng database thật.
+- docker compose config --quiet và git diff --check đạt. Docker Engine chưa chạy, chưa chạy lại smoke Gateway/Auth hoặc full-stack end-to-end.
+- Smoke script đã bổ sung tọa độ bắt buộc khi tạo chuyến. Bỏ kỳ vọng API danh sách lời mời chưa triển khai; vẫn kiểm tra accept bị chặn trước khi mời và thành công sau khi Matching tạo lời mời.
+
+Các kết quả bên dưới là báo cáo cũ của nhánh van, không phải xác nhận cho bản merge hiện tại.
+
 ## Đã bổ sung
 
 - Ocelot map /api/trips/* → /trips/*, /api/payments/* → /payments/*.
