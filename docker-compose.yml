@@ -1,3 +1,4 @@
+# Local development/test stack. Default credentials and JWT key are public test values only.
 services:
   trip-postgres:
     image: postgres:18
@@ -87,7 +88,7 @@ services:
     environment:
       POSTGRES_DB: swiftride_auth
       POSTGRES_USER: swiftride
-      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-gateway_test_password}
     ports:
       - "127.0.0.1:5435:5432"
     volumes:
@@ -105,8 +106,8 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
       AuthDatabase__EnsureCreated: "true"
-      ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
-      JwtSettings__SecretKey: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
+      ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:-gateway_test_password}
+      JwtSettings__SecretKey: ${JWT_SECRET_KEY:-swiftride-local-test-only-signing-key-at-least-32-bytes-2026}
       Routes__0__DownstreamHostAndPorts__0__Host: trip-service
       Routes__0__DownstreamHostAndPorts__0__Port: 8080
       Routes__1__DownstreamHostAndPorts__0__Host: matching-service

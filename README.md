@@ -176,4 +176,4 @@ Package này là **khung khởi tạo**, chưa chứa implementation nghiệp v�
 
 ## Authentication tại Gateway
 
-API Gateway đã tích hợp Auth trực tiếp với PostgreSQL, JWT, refresh token rotation/replay detection và Ocelot identity headers. Toàn bộ solution dùng .NET 10; Gateway dùng EF Core 10/Npgsql. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose yêu cầu thêm AUTH_DB_PASSWORD và JWT_SECRET_KEY trong .env.
+API Gateway đã tích hợp Auth trực tiếp với PostgreSQL, JWT, refresh token rotation/replay detection và Ocelot identity headers. Toàn bộ solution dùng .NET 10; Gateway dùng EF Core 10/Npgsql. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose có giá trị mặc định để test local; có thể override AUTH_DB_PASSWORD và JWT_SECRET_KEY trong .env. Xem docs/gateway-docker-test.md.

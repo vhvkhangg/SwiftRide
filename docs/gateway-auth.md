@@ -18,7 +18,7 @@ Không có route Ocelot /auth/*: đây là endpoints nội bộ có [AllowAnonym
 ## Chạy với Docker Compose
 
 1. Copy .env.example thành .env.
-2. Điền AUTH_DB_PASSWORD và JWT_SECRET_KEY. Sinh key bằng CSPRNG, ít nhất 32 bytes; ví dụ PowerShell:
+2. Có thể điền AUTH_DB_PASSWORD và JWT_SECRET_KEY để override các giá trị test mặc định trong Compose. Sinh key bằng CSPRNG, ít nhất 32 bytes; ví dụ PowerShell:
 
    ~~~powershell
    [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(64))

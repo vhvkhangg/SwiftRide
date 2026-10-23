@@ -9,7 +9,7 @@
         "PATCH",
         "DELETE"
       ],
-      "DownstreamPathTemplate": "/api/trips/{everything}",
+      "DownstreamPathTemplate": "/trips/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {

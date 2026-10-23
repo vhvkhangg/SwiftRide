@@ -1,40 +1,40 @@
 # Test Gateway Auth với PostgreSQL
 
-File độc lập: docker-compose.gateway-test.yml ở thư mục gốc. Không cần file .env; credentials và JWT key công khai trong file chỉ dành cho test local. Chạy lệnh tại D:SwiftRide. Cần Docker Desktop đang chạy Linux containers.
+Dùng duy nhất docker-compose.yml ở thư mục gốc cho toàn bộ backend. Không cần .env khi test local: Compose có giá trị mặc định cho password và JWT key, chỉ dành cho development/test. Có thể override bằng .env hoặc environment variables.
+
+Chạy tại D:SwiftRide với Docker Desktop Linux containers:
 
 ~~~powershell
-docker compose -f docker-compose.gateway-test.yml up --build -d
-docker compose -f docker-compose.gateway-test.yml logs -f api-gateway
+docker compose up --build -d
+docker compose logs -f api-gateway
 ~~~
 
-Chờ log Gateway báo listening trên port 8080, sau đó:
+Chờ Gateway báo listening rồi kiểm tra bằng PowerShell 7:
 
 ~~~powershell
 Invoke-RestMethod http://localhost:5100/health
 pwsh -File tests/ApiGateway.Smoke/auth-smoke.ps1
 ~~~
 
-Script yêu cầu PowerShell 7 và kiểm tra đăng ký, trùng email, login, refresh rotation, replay/family revocation, logout và JWT bắt buộc. Rate limit là 20 requests/phút/IP: nếu chạy script lại ngay bị 429, chờ ít nhất một phút.
+Smoke test kiểm tra register, duplicate email, login, refresh rotation, replay/family revocation, concurrent refresh, logout và JWT bắt buộc. Nếu chạy lại ngay bị 429, chờ ít nhất một phút.
 
-PostgreSQL cho pgAdmin/DBeaver:
+PostgreSQL Auth:
 - Host: localhost
 - Port: 5435
 - Database: swiftride_auth
 - Username: swiftride
-- Password: gateway_test_password
+- Password mặc định: gateway_test_password (hoặc AUTH_DB_PASSWORD nếu đã override)
 
-Compose chỉ chạy Gateway + PostgreSQL, chưa khởi động downstream services. Vì vậy protected request không JWT trả 401; request JWT hợp lệ tới route proxy có thể trả 502 do downstream chưa chạy. Không dùng file này để xác nhận forwarding/header enrichment. Các endpoint /auth/* và /health chạy nội bộ.
+Gateway: http://localhost:5100. Trip/Matching/Payment chạy cùng stack, Gateway định tuyến theo service names trong Docker. Products/Orders vẫn là route mẫu, chưa có service trong stack. Để test forwarding với JWT hợp lệ, gọi một endpoint /api/trips/* đã được triển khai trong TripService; Ocelot giữ nguyên đường dẫn này khi proxy.
 
-Dừng containers và giữ dữ liệu:
+Dừng toàn bộ backend và giữ dữ liệu:
+
 ~~~powershell
-docker compose -f docker-compose.gateway-test.yml down
+docker compose down
 ~~~
 
-Xóa database test để chạy từ đầu (mất toàn bộ user/token của stack test):
-~~~powershell
-docker compose -f docker-compose.gateway-test.yml down -v
-~~~
+Không cần down -v để chạy test; lệnh đó sẽ xóa dữ liệu tất cả database của stack. EnsureCreated chỉ tạo schema mới, không nâng cấp schema cũ.
 
-Stack dùng project name và volume riêng, không dùng database của docker-compose.yml chính. Cổng 5100/5435 trùng stack chính: dừng stack chính trước nếu đang chạy. EnsureCreated chỉ tạo schema mới; nếu schema test cũ không tương thích, dùng database test mới hoặc reset volume test.
+Nếu trước đây đã chạy stack swiftride-gateway-test riêng, cần dừng các containers cũ trước vì trùng cổng 5100/5435. Volume cũ không được chuyển hoặc xóa tự động.
 
-Cấu hình đã được kiểm tra bằng docker compose config --quiet. Chưa chạy containers trong môi trường tạo file.
+Production phải cung cấp secrets riêng, tắt EnsureCreated, dùng migrations và cấu hình mạng/TLS phù hợp. Cấu hình Compose đã được kiểm tra cú pháp; chưa xác nhận toàn bộ containers chạy thành công.
