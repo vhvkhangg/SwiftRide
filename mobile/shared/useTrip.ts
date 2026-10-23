@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initialTrip, readSnapshot, snapshot, storageKey, tripReducer } from './domain';
 import type { Role } from './domain';
 
-const saveError = 'Không lưu được tiến trình. Giữ ứng dụng mở và thử thao tác lại.';
+const saveError = 'Không lưu được tiến trình. Giữ ứng dụng mở và bấm Thử lưu lại.';
 
 export function useTrip(role: Role) {
   const [trip, dispatch] = useReducer(tripReducer, initialTrip);
@@ -11,6 +11,8 @@ export function useTrip(role: Role) {
   const [storageError, setStorageError] = useState('');
   const [reload, setReload] = useState(0);
   const [canSave, setCanSave] = useState(false);
+  const [saveAttempt, setSaveAttempt] = useState(0);
+  const [saving, setSaving] = useState(false);
   const writes = useRef(Promise.resolve());
   useEffect(() => {
     let mounted = true;
@@ -29,10 +31,14 @@ export function useTrip(role: Role) {
 
   useEffect(() => {
     if (!ready || !canSave) return;
+    let current = true;
+    setSaving(true);
     writes.current = writes.current.then(() => AsyncStorage.setItem(storageKey(role), snapshot(trip, role)))
-      .then(() => { setStorageError(error => error === saveError ? '' : error); })
-      .catch(() => { setStorageError(saveError); });
-  }, [trip, ready, canSave, role]);
+      .then(() => { if (current) setStorageError(error => error === saveError ? '' : error); })
+      .catch(() => { if (current) setStorageError(saveError); })
+      .finally(() => { if (current) setSaving(false); });
+    return () => { current = false; };
+  }, [trip, ready, canSave, role, saveAttempt]);
 
-  return { trip, dispatch, ready, canSave, storageError, retryLoad: () => { setReady(false); setReload(value => value + 1); } };
+  return { trip, dispatch, ready, canSave, storageError, saveFailed: storageError === saveError, saving, retrySave: () => setSaveAttempt(value => value + 1), retryLoad: () => { setReady(false); setReload(value => value + 1); } };
 }

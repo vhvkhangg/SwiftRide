@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Dispatch, ReactNode } from 'react';
-import { ActivityIndicator, BackHandler, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import type { ComponentRef, Dispatch, ReactNode } from 'react';
+import { ActivityIndicator, BackHandler, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -11,30 +11,34 @@ import { isActive, statusLabels, tripId } from './domain';
 import type { Action, Role, Status, Trip } from './domain';
 import { useTrip } from './useTrip';
 import Login from './Login';
+import TripActions from './TripActions';
+import { readConfig } from './config';
 import { Button, Card, Eyebrow, font, Icon, Note, palette, Sheet, styles, T, Title } from './ui';
 
 export type Screen = { code: string; label: string; status: Status };
 export type Confirm = (title: string, message: string, onConfirm: () => void) => void;
 export type TripScreenProps = { trip: Trip; dispatch: Dispatch<Action>; confirm: Confirm };
 type Props = { role: Role; screens: Screen[]; renderTrip: (props: TripScreenProps) => ReactNode };
+const config = readConfig(process.env.EXPO_PUBLIC_APP_MODE, process.env.EXPO_PUBLIC_GATEWAY_URL);
 
 export default function MobileApp(props: Props) {
   const [loaded, fontError] = useFonts({ BeVietnamPro_400Regular, BeVietnamPro_500Medium, BeVietnamPro_700Bold });
   return <SafeAreaProvider><StatusBar style="dark" /><SafeAreaView style={shell.safe} edges={['top', 'bottom']}>
-    {!loaded && !fontError ? <ActivityIndicator accessibilityLabel="Đang tải ứng dụng" style={styles.flex} color={palette.teal} /> : <AppContent {...props} />}
+    {!loaded && !fontError ? <ActivityIndicator accessibilityLabel="Đang tải ứng dụng" style={styles.flex} color={palette.teal} /> : config.error || config.mode === 'api' ? <ScrollView contentContainerStyle={[styles.content, { paddingTop: 40 }]}><Eyebrow>SWIFTRIDE · {props.role.toUpperCase()}</Eyebrow><Title>Chưa thể kết nối API</Title><Note warning>{config.error || 'Chế độ API chưa nối Auth và chuyến đi. Cần contract từ BE trước khi sử dụng; không đăng nhập demo hoặc tạo dữ liệu giả trong chế độ này.'}</Note><T style={styles.caption}>Kiểm tra EXPO_PUBLIC_APP_MODE và EXPO_PUBLIC_GATEWAY_URL, sau đó khởi động lại Expo. Dùng EXPO_PUBLIC_APP_MODE=demo để xem giao diện mô phỏng.</T></ScrollView> : <AppContent {...props} />}
   </SafeAreaView></SafeAreaProvider>;
 }
 
 function AppContent({ role, screens, renderTrip }: Props) {
-  const { trip, dispatch, ready, canSave, storageError, retryLoad } = useTrip(role);
+  const { trip, dispatch, ready, canSave, storageError, retryLoad, retrySave, saveFailed, saving } = useTrip(role);
   const [signedIn, setSignedIn] = useState(false);
   const [tab, setTab] = useState<'trip' | 'account'>('trip');
   const [showDemo, setShowDemo] = useState(false);
   const [confirmation, setConfirmation] = useState<{ title: string; message: string; accept: () => void } | null>(null);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   const confirm: Confirm = (title, message, accept) => { setConfirmation({ title, message, accept }); setShowDemo(true); };
   useEffect(() => { scroll.current?.scrollTo({ y: 0, animated: false }); }, [trip.status, tab]);
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!signedIn) return false;
       if (tab === 'account') { setTab('trip'); return true; }
@@ -55,6 +59,7 @@ function AppContent({ role, screens, renderTrip }: Props) {
     <View style={shell.header}><View style={styles.flex}><T style={shell.brand}>SwiftRide<T style={{ color: palette.teal }}>.</T></T><Eyebrow>{role === 'rider' ? 'RIDER · HÀNH KHÁCH' : 'DRIVER · TÀI XẾ'}</Eyebrow></View><Pressable accessibilityRole="button" accessibilityLabel="Kịch bản demo" onPress={() => { setConfirmation(null); setShowDemo(true); }} style={shell.demoButton}><Icon name="layers" /><T style={styles.caption}>Demo</T></Pressable></View>
     <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, tab === 'account' && { paddingTop: 20 }]}>
       {!!storageError && <Note warning>{storageError}</Note>}
+      {saveFailed && <Button title="Thử lưu lại" variant="secondary" busy={saving} onPress={retrySave} />}
       {tab === 'trip' ? renderTrip({ trip, dispatch, confirm }) : <>
         <Eyebrow>KHÔNG GIAN CỦA BẠN</Eyebrow><Title>{role === 'rider' ? 'Chào Khánh.' : 'Chào Minh Anh.'}</Title>
         <Card><View style={styles.row}><View style={styles.avatar}><Icon name="user" /></View><View style={styles.flex}><T style={styles.subtitle}>{role === 'rider' ? 'Hành khách' : 'Tài xế'}</T><T selectable style={styles.caption}>{role}@swiftride.demo</T></View></View><View style={styles.divider} /><T>{role === 'rider' ? 'SwiftRide Bike · Di chuyển trong thành phố' : 'Honda Vision · Trắng · 59-S1 123.45'}</T></Card>
@@ -64,6 +69,7 @@ function AppContent({ role, screens, renderTrip }: Props) {
       </>}
       <T style={[styles.caption, { textAlign: 'center', marginTop: 6 }]}>Dữ liệu minh họa · Không có giao dịch thật</T>
     </ScrollView>
+    {tab === 'trip' && <View style={shell.actions}><TripActions role={role} trip={trip} dispatch={dispatch} confirm={confirm} /></View>}
     <View accessibilityRole="tablist" style={shell.tabs}>
       {(['trip', 'account'] as const).map(item => <Pressable key={item} accessibilityRole="tab" accessibilityLabel={item === 'trip' ? 'Chuyến đi' : 'Tài khoản'} accessibilityState={{ selected: tab === item }} onPress={() => setTab(item)} style={shell.tab}>
         <Icon name={item === 'trip' ? (role === 'driver' ? 'bike' : 'home') : 'user'} color={tab === item ? palette.teal : palette.muted} /><T style={[styles.caption, tab === item && { color: palette.teal, fontFamily: font.bold }]}>{item === 'trip' ? 'Chuyến đi' : 'Tài khoản'}</T>
@@ -85,6 +91,7 @@ function AppContent({ role, screens, renderTrip }: Props) {
 
 const shell = StyleSheet.create({
   safe: { flex: 1, backgroundColor: palette.white, width: '100%', maxWidth: 560, alignSelf: 'center' },
+  actions: { paddingHorizontal: 20, paddingVertical: 8, backgroundColor: palette.white },
   header: { paddingHorizontal: 22, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', backgroundColor: palette.white },
   brand: { fontFamily: font.bold, fontSize: 23, lineHeight: 31, letterSpacing: -1 }, demoButton: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: palette.line, backgroundColor: palette.white, paddingTop: 8, paddingBottom: 4 }, tab: { flex: 1, minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 3 },

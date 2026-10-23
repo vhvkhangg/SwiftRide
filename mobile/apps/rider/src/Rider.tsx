@@ -24,7 +24,6 @@ export default function Rider(props: TripScreenProps) {
           <Icon name="pin" color={item === 'pickup' ? palette.teal : palette.coral} /><View style={styles.flex}><T style={styles.caption}>{item === 'pickup' ? 'ĐÓN TÔI TẠI' : 'ĐƯA TÔI ĐẾN'}</T><T style={styles.place}>{trip[item] ? findPlace(trip[item]).name : 'Chọn điểm đến'}</T></View><Icon name="arrow" size={17} />
         </Pressable>)}
         {trip.destination === trip.pickup && <Note warning>Điểm đến cần khác điểm đón.</Note>}
-        <Button title="Xem giá chuyến đi" icon="arrow" disabled={!trip.destination || trip.destination === trip.pickup} onPress={() => dispatch({ type: 'quote' })} />
       </Card>
       <Eyebrow>ĐIỂM ĐẾN GỢI Ý</Eyebrow>
       {places.filter(place => place.id !== trip.pickup).map(place => <Pressable key={place.id} accessibilityRole="button" accessibilityLabel={`Đến ${place.name}`} onPress={() => dispatch({ type: 'place', field: 'destination', id: place.id })} style={[styles.row, { paddingVertical: 10 }]}><View style={styles.avatar}><Icon name="pin" /></View><View style={styles.flex}><T style={styles.place}>{place.name}</T><T style={styles.caption}>{place.address}</T></View><Icon name="arrow" size={18} /></Pressable>)}
@@ -34,7 +33,7 @@ export default function Rider(props: TripScreenProps) {
         <View style={styles.row}><View style={styles.avatar}><Icon name="bike" size={29} /></View><View style={styles.flex}><T style={styles.subtitle}>SwiftRide Bike</T><T style={styles.caption}>1 hành khách · Xe máy</T></View><Icon name="check" /></View>
         <View style={styles.row}><Metric label="Quãng đường mẫu" value={`${fare.distance} km`} /><Metric label="Thời gian mẫu" value={`${fare.minutes} phút`} /></View>
         <T style={styles.fare}>{money(fare.fare)}</T><Button title="Chi tiết giá mẫu" variant="secondary" onPress={() => setDetails(true)} />
-        <Button title="Xác nhận đặt xe" icon="arrow" onPress={() => dispatch({ type: 'book' })} /><Button title="Sửa hành trình" variant="secondary" onPress={() => dispatch({ type: 'edit' })} /><Button title="Từ chối giá" variant="danger" onPress={cancel} />
+        <Button title="Sửa hành trình" variant="secondary" onPress={() => dispatch({ type: 'edit' })} /><Button title="Từ chối giá" variant="danger" onPress={cancel} />
       </Card>
     </>}
     {trip.status === 'searching' && <>
