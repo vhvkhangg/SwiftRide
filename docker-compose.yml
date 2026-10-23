@@ -1,4 +1,10 @@
 # Local development/test stack. Default credentials and JWT key are public test values only.
+x-service-security: &service-security
+  JwtSettings__Issuer: SwiftRide.Gateway
+  JwtSettings__Audience: SwiftRide.Client
+  JwtSettings__SecretKey: ${JWT_SECRET_KEY:-swiftride-local-test-only-signing-key-at-least-32-bytes-2026}
+  ServiceAuth__SecretKey: ${SERVICE_AUTH_SECRET_KEY:-swiftride-local-internal-only-signing-key-at-least-32-bytes-2026}
+
 services:
   rabbitmq:
     image: rabbitmq:4.1.8-management
@@ -176,6 +182,8 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
       AuthDatabase__EnsureCreated: "true"
+      DevelopmentAccounts__Enabled: "true"
+      DevelopmentAccounts__Password: ${DEV_ACCOUNT_PASSWORD:-SwiftRide-demo-2026!}
       ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:-gateway_test_password}
       JwtSettings__SecretKey: ${JWT_SECRET_KEY:-swiftride-local-test-only-signing-key-at-least-32-bytes-2026}
       Routes__0__DownstreamHostAndPorts__0__Host: trip-service
@@ -201,6 +209,7 @@ services:
       - "5100:8080"
 
 volumes:
+  rabbitmq-data:
   auth-postgres-data:
   trip-postgres-data:
   matching-mongo-data:

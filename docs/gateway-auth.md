@@ -19,12 +19,7 @@ Routes nằm trong src/ApiGateway/ocelot.json. Compose override host/port theo i
 
 ## Xác thực nhất quán
 
-<<<<<<< HEAD
-1. Copy .env.example thành .env.
-2. Có thể điền AUTH_DB_PASSWORD và JWT_SECRET_KEY để override các giá trị test mặc định trong Compose. Sinh key bằng CSPRNG, ít nhất 32 bytes; ví dụ PowerShell:
-=======
 Gateway xác thực JWT trước khi proxy. IdentityHeaders handler luôn strip X-User-Id/Email/Roles do client gửi và có thể gắn lại claims đã xác thực để quan sát. Header Authorization được giữ để mỗi downstream tự validate JWT qua src/Shared/ServiceSecurity.cs. Services hoàn toàn không lấy quyền từ X-User-*.
->>>>>>> van
 
 Các service dùng cùng JwtSettings:SecretKey/Issuer/Audience với Gateway. HS256 là mô hình tin cậy chung cho các service trong demo; production có thể chuyển sang ký bất đối xứng để downstream chỉ giữ public key. TLS cần được cấu hình ở edge và mạng giữa services theo deployment.
 
@@ -60,7 +55,7 @@ Revoke idempotent trả 204 và thu hồi family, không thu hồi các phiên �
 - Driver chỉ xem/cập nhật chuyến đã được giao. Không được tạo chuyến thay Rider.
 - Vị trí Driver luôn dùng DriverId từ JWT; DriverId trong body bị bỏ qua.
 - Rider gọi /api/matching/match cho chuyến của mình. Matching tìm driver gần đó và tạo invitation bằng API nội bộ có authentication.
-- GET /api/trips/invitations dành cho Driver, chỉ trả lời mời của chính mình còn hạn.
+- API danh sách lời mời /api/trips/invitations chưa triển khai, thuộc task Trip orchestration. Kiểm tra quyền nhận chuyến hiện dùng lời mời được Matching lưu qua endpoint nội bộ.
 - Driver nhận chuyến chỉ khi có invitation còn hạn (2 phút), Trip Requested và chưa có Driver. ID ở body không được dùng. PostgreSQL xmin concurrency token ngăn hai Driver nhận cùng một chuyến; loser trả 409.
 - Driver được giao dropoff sẽ chuyển chuyến sang PaymentPending trong cùng SaveChanges, không cần client gọi system transition.
 - Rider chỉ tạo/xem payment cho chuyến mình. Ownership được kiểm tra trước cả nhánh retry idempotency.
@@ -79,7 +74,7 @@ InternalTripHandler cấp token theo từng request. Endpoints /internal/* khôn
 
 ## Chạy Docker
 
-Copy .env.example thành .env, đặt AUTH_DB_PASSWORD và JWT_SECRET_KEY (CSPRNG >=32 bytes); nên đặt SERVICE_AUTH_SECRET_KEY riêng. Docker Compose vẫn yêu cầu secrets này, không commit file .env.
+Compose có secrets mặc định chỉ dành cho local/test. Có thể copy .env.example thành .env để override AUTH_DB_PASSWORD, JWT_SECRET_KEY và SERVICE_AUTH_SECRET_KEY. Hai signing keys phải khác nhau, mỗi key ít nhất 32 bytes; không commit file .env. Không dùng secrets mặc định ở production.
 
 ~~~powershell
 docker compose up --build -d

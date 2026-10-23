@@ -3,6 +3,8 @@ using SwiftRide.Security;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Application.Services;
+using SwiftRide.TripService.Domain.Enums;
+using SwiftRide.TripService.Infrastructure;
 
 namespace SwiftRide.TripService.Api;
 
@@ -10,15 +12,16 @@ public static class TripEndpoints
 {
     public static void MapTripEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/trips").WithTags("Trips");
+        var group = app.MapGroup("/trips").WithTags("Trips")
+            .RequireAuthorization().AddEndpointFilter<TripAccessFilter>();
 
         // API Đặt xe (POST /trips)
-        group.MapPost("/", async (CreateTripRequest request, ITripApplicationService service,
+        group.MapPost("/", async (CreateTripRequest request, HttpContext context, ITripApplicationService service,
             ILogger<TripApplicationService> logger, CancellationToken ct) =>
         {
             try
             {
-                var response = await service.CreateAsync(request, ct);
+                var response = await service.CreateAsync(request with { RiderId = context.User.UserId() }, ct);
                 return Results.Created($"/trips/{response.Id}", response);
             }
             catch (ArgumentException ex)
@@ -30,7 +33,7 @@ public static class TripEndpoints
                 logger.LogError(ex, "Gửi TripRequestedV1 lỗi cho chuyến {TripId}", ex.TripId);
                 return Results.Json(new { tripId = ex.TripId, error = ex.Message }, statusCode: 503);
             }
-        });
+        }).RequireAuthorization(p => p.RequireRole("Rider"));
 
         // API Lấy thông tin chuyến đi
         group.MapGet("/{id:guid}", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
@@ -89,11 +92,11 @@ public sealed class TripAccessFilter(TripDbContext db) : IEndpointFilter
         try
         {
             var http = context.HttpContext;
+            var userId = http.User.UserId();
             if (http.Request.RouteValues["id"] is object raw && Guid.TryParse(raw.ToString(), out var id))
             {
                 var trip = await db.Trips.SingleOrDefaultAsync(x => x.Id == id, http.RequestAborted);
                 if (trip is null) return Results.NotFound();
-                var userId = http.User.UserId();
                 if (http.Request.Path.Value!.EndsWith("/driver-accept", StringComparison.OrdinalIgnoreCase))
                 {
                     if (trip.Status != TripStatus.Requested || trip.DriverId is not null) return Results.Conflict();
