@@ -10,6 +10,7 @@ using Xunit;
 
 namespace SwiftRide.PaymentService.Tests.Integration;
 
+[Collection("Payment database")]
 public sealed class PaymentConcurrencyTests
 {
     [Fact]

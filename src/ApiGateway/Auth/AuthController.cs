@@ -16,12 +16,21 @@ public sealed record RefreshRequest([Required, StringLength(128, MinimumLength =
 
 [ApiController]
 [Route("auth")]
-[AllowAnonymous]
 [EnableRateLimiting("auth")]
 public sealed class AuthController(AuthDbContext db, TokenService tokens,
     IPasswordHasher<User> hasher, DummyPasswordHash dummyHash, TimeProvider clock) : ControllerBase
 {
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<IActionResult> Me(CancellationToken ct)
+    {
+        if (!Guid.TryParse(User.FindFirst("sub")?.Value, out var id)) return Unauthorized();
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        return user is null ? Unauthorized() : Ok(new { user.Id, user.Email, roles = new[] { user.Role } });
+    }
+
     [HttpPost("register")]
+    [AllowAnonymous]
     public async Task<IActionResult> Register(Credentials request, CancellationToken ct)
     {
         var user = new User { Email = request.Email.Trim(), NormalizedEmail = request.Email.Trim().ToUpperInvariant() };
@@ -36,6 +45,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
     }
 
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<IActionResult> Login(Credentials request, CancellationToken ct)
     {
         var user = await db.Users.SingleOrDefaultAsync(
@@ -48,6 +58,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
             return Problem(statusCode: 401, title: "Invalid credentials.");
         if (result == PasswordVerificationResult.SuccessRehashNeeded)
             user.PasswordHash = hasher.HashPassword(user, request.Password);
+        if (user.Role == "User") user.Role = "Rider"; // Legacy default role, no privileged elevation.
         var issued = tokens.Issue(user);
         db.RefreshTokens.Add(issued.Entity);
         await db.SaveChangesAsync(ct);
@@ -56,6 +67,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
     }
 
     [HttpPost("refresh-token")]
+    [AllowAnonymous]
     public async Task<IActionResult> Refresh(RefreshRequest request, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, ct);
@@ -83,6 +95,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
     }
 
     [HttpPost("revoke")]
+    [AllowAnonymous]
     public async Task<IActionResult> Revoke(RefreshRequest request, CancellationToken ct)
     {
         // Possession of the secret refresh token authorizes logout, even after JWT expiry.

@@ -13,6 +13,7 @@ internal sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) :
         var (status, title) = exception switch
         {
             ArgumentException or ArgumentOutOfRangeException => (StatusCodes.Status400BadRequest, "Yêu cầu không hợp lệ"),
+            HttpRequestException => (StatusCodes.Status502BadGateway, "TripService unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Đã xảy ra lỗi không mong muốn")
         };
 

@@ -23,7 +23,7 @@ public sealed class IdentityHeaders(IHttpContextAccessor accessor) : DelegatingH
             Set(request, Names[1], user.FindFirstValue("email"));
             Set(request, Names[2], string.Join(",", user.FindAll("role").Select(x => x.Value)));
         }
-        request.Headers.Remove("Authorization");
+        // Preserve bearer token: downstream validates JWT independently.
         request.Headers.Remove("Cookie");
         return base.SendAsync(request, ct);
     }

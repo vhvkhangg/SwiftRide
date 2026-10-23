@@ -8,6 +8,7 @@ using Xunit;
 
 namespace SwiftRide.PaymentService.Tests.Integration;
 
+[Collection("Payment database")]
 public sealed class PaymentWeek4IntegrationTests
 {
     private static async Task<DbContextOptions<PaymentDbContext>>

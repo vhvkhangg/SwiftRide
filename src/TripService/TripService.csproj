@@ -12,8 +12,12 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+<<<<<<< HEAD
   <ItemGroup>
     <ProjectReference Include="../SwiftRide.Contracts/SwiftRide.Contracts.csproj" />
     <ProjectReference Include="../SwiftRide.Messaging/SwiftRide.Messaging.csproj" />
   </ItemGroup>
+=======
+  <ItemGroup><Compile Include="../Shared/ServiceSecurity.cs" Link="Security/ServiceSecurity.cs" /></ItemGroup>
+>>>>>>> van
 </Project>

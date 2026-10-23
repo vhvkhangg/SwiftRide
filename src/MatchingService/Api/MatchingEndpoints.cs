@@ -1,3 +1,4 @@
+using SwiftRide.Security;
 using MongoDB.Driver.GeoJsonObjectModel;
 using SwiftRide.MatchingService.Application.Interfaces;
 using SwiftRide.MatchingService.Domain.Interfaces;
@@ -16,11 +17,18 @@ public static class MatchingEndpoints
         })
         .WithSummary("Tính toán báo giá chuyến đi")
         .WithTags("Định giá (Pricing)")
-        .Produces<QuoteResponseDto>();
+        .Produces<QuoteResponseDto>().RequireAuthorization(p => p.RequireRole("Rider"));
 
-        _ = app.MapPost("/match", async (MatchRequestDto request, IMatchingService service, CancellationToken ct) =>
+        _ = app.MapPost("/match", async (MatchRequestDto request, IMatchingService service, TripAccessClient trips, HttpContext context, CancellationToken ct) =>
         {
+            if (!Guid.TryParse(request.TripId, out var tripId)) return Results.BadRequest();
+            var trip = await trips.GetAsync(tripId, ct);
+            if (trip is null) return Results.NotFound();
+            if (trip.RiderId != context.User.UserId()) return Results.Forbid();
             var result = await service.MatchAsync(request.ToDomain(), ct);
+            foreach (var driver in result.Drivers)
+                if (Guid.TryParse(driver.DriverId, out var driverId))
+                    await trips.InviteAsync(tripId, driverId, ct);
             var response = new MatchResponseDto(result.TripId, [.. result.Drivers
                 .Select(driver => new MatchedDriverDto(driver.DriverId, driver.Latitude, driver.Longitude,
                     driver.DistanceKm, driver.UpdatedAt))]);
@@ -28,20 +36,21 @@ public static class MatchingEndpoints
         })
         .WithSummary("Tìm các tài xế trống ở gần")
         .WithTags("Ghép đôi (Matching)")
-        .Produces<MatchResponseDto>();
+        .Produces<MatchResponseDto>().RequireAuthorization(p => p.RequireRole("Rider"));
     }
 
     public static void MapDriverEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/api/drivers/location", async (
-            DriverLocationRequestDto request, IDriverRepository repository, CancellationToken ct) =>
+            DriverLocationRequestDto request, IDriverRepository repository, HttpContext context, CancellationToken ct) =>
         {
+            request = request with { DriverId = context.User.UserId().ToString() };
             var point = GeoJson.Point(GeoJson.Geographic(request.Longitude, request.Latitude));
             await repository.UpsertLocationAsync(request.DriverId, point, request.IsAvailable, ct);
             return Results.Ok(new DriverLocationResponseDto(request.DriverId, request.IsAvailable, DateTimeOffset.UtcNow));
         })
         .WithSummary("Cập nhật vị trí GPS của tài xế")
         .WithTags("Tài xế (Drivers)")
-        .Produces<DriverLocationResponseDto>();
+        .Produces<DriverLocationResponseDto>().RequireAuthorization(p => p.RequireRole("Driver"));
     }
 }

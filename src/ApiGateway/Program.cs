@@ -78,6 +78,8 @@ if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("Aut
     await using var scope = app.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
 }
+if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("DevelopmentAccounts:Enabled"))
+    await DevelopmentAccounts.SeedAsync(app.Services, builder.Configuration);
 await app.UseOcelot();
 await app.RunAsync();
 

@@ -1,3 +1,4 @@
+using SwiftRide.Security;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using SwiftRide.Messaging;
@@ -30,16 +31,22 @@ builder.Services.AddScoped<IPricingStrategy, SwiftRide.MatchingService.Domain.St
 builder.Services.AddScoped<IPricingStrategy, SwiftRide.MatchingService.Domain.Strategies.SurgePricingStrategy>();
 builder.Services.AddScoped<IPricingStrategy, SwiftRide.MatchingService.Domain.Strategies.PromoPricingStrategy>();
 
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer();
+builder.Services.AddServiceSecurity(builder.Configuration);
 
-builder.Services.AddAuthorization();
+
 builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+
+builder.Services.AddTransient<InternalTripHandler>();
+builder.Services.AddHttpClient<TripAccessClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Services:TripService:BaseUrl"]
+        ?? throw new InvalidOperationException("TripService URL required."));
+    client.Timeout = TimeSpan.FromSeconds(5);
+}).AddHttpMessageHandler<InternalTripHandler>();
 
 var app = builder.Build();
 

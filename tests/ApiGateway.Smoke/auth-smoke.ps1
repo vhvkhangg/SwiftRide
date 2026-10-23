@@ -37,7 +37,7 @@ try {
     $results = @($jobs | Wait-Job | Receive-Job -ErrorAction Stop)
     if (@($results | Where-Object Status -eq 200).Count -ne 1 -or
         @($results | Where-Object Status -eq 401).Count -ne 1) {
-        throw "Concurrent rotation must have exactly one 200 and one 401."
+        throw "Concurrent rotation must have exactly one 200 and one 401; got: $($results.Status -join ','). If 429, wait one minute before retrying."
     }
     $child = ($results | Where-Object Status -eq 200).Body | ConvertFrom-Json
     $null = Send-Json "/auth/refresh-token" @{ refreshToken = $child.refreshToken } 401

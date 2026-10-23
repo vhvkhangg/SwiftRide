@@ -83,7 +83,9 @@ services:
       context: .
       dockerfile: src/TripService/Dockerfile
     environment:
+      <<: *service-security
       ASPNETCORE_URLS: http://+:8080
+      Database__Migrate: "true"
       ConnectionStrings__TripDb: Host=trip-postgres;Port=5432;Database=${TRIP_DB_NAME:-swiftride_trip};Username=${TRIP_DB_USER:-swiftride};Password=${TRIP_DB_PASSWORD:-swiftride_dev}
       RabbitMq__Host: rabbitmq
       RabbitMq__Port: 5672
@@ -105,7 +107,10 @@ services:
       context: .
       dockerfile: src/MatchingService/Dockerfile
     environment:
+      <<: *service-security
       ASPNETCORE_URLS: http://+:8080
+      ServiceAuth__ServiceName: matching-service
+      Services__TripService__BaseUrl: http://trip-service:8080/
       ConnectionStrings__MatchDb: mongodb://matching-mongodb:27017/${MATCH_DB_NAME:-swiftride_matching}
       RabbitMq__Host: rabbitmq
       RabbitMq__Port: 5672
@@ -127,7 +132,11 @@ services:
       context: .
       dockerfile: src/PaymentService/Dockerfile
     environment:
+      <<: *service-security
       ASPNETCORE_URLS: http://+:8080
+      Database__Migrate: "true"
+      ServiceAuth__ServiceName: payment-service
+      Services__TripService__BaseUrl: http://trip-service:8080/
       ConnectionStrings__PaymentDb: Host=payment-postgres;Port=5432;Database=${PAYMENT_DB_NAME:-swiftride_payment};Username=${PAYMENT_DB_USER:-swiftride};Password=${PAYMENT_DB_PASSWORD:-swiftride_dev}
       RabbitMq__Host: rabbitmq
       RabbitMq__Port: 5672
@@ -175,6 +184,10 @@ services:
       Routes__1__DownstreamHostAndPorts__0__Port: 8080
       Routes__2__DownstreamHostAndPorts__0__Host: payment-service
       Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Routes__6__DownstreamHostAndPorts__0__Host: matching-service
+      Routes__6__DownstreamHostAndPorts__0__Port: 8080
+      Routes__7__DownstreamHostAndPorts__0__Host: matching-service
+      Routes__7__DownstreamHostAndPorts__0__Port: 8080
     depends_on:
       auth-postgres:
         condition: service_healthy
