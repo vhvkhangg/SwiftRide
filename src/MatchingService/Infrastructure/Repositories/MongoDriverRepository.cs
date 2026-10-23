@@ -7,6 +7,8 @@ namespace SwiftRide.MatchingService.Infrastructure.Repositories;
 
 public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRepository
 {
+    private static readonly TimeSpan DriverLocationValidity = TimeSpan.FromMinutes(10);
+
     private readonly IMongoCollection<DriverLocation> collection =
         mongoClient.GetDatabase("swiftride_matching").GetCollection<DriverLocation>("drivers");
 
@@ -42,8 +44,10 @@ public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRep
         CancellationToken cancellationToken)
     {
         var point = GeoJson.Point(GeoJson.Geographic(longitude, latitude));
+        var minimumUpdatedAt = DateTime.UtcNow - DriverLocationValidity;
         var filter = Builders<DriverLocation>.Filter.And(
             Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
+            Builders<DriverLocation>.Filter.Gte(driver => driver.UpdatedAt, minimumUpdatedAt),
             Builders<DriverLocation>.Filter.NearSphere(driver => driver.Location, point, radiusKm * 1000));
         var drivers = await collection.Find(filter).Limit(limit).ToListAsync(cancellationToken);
         return drivers
