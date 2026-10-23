@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using MySqlConnector;
+using Npgsql;
 using SwiftRide.ApiGateway.Data;
 
 namespace SwiftRide.ApiGateway.Auth;
@@ -28,7 +28,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
         user.PasswordHash = hasher.HashPassword(user, request.Password);
         db.Users.Add(user);
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException ex) when (ex.InnerException is MySqlException { Number: 1062 })
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_Users_NormalizedEmail" })
         {
             return Problem(statusCode: 409, title: "Email already registered.");
         }
@@ -58,7 +58,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
     [HttpPost("refresh-token")]
     public async Task<IActionResult> Refresh(RefreshRequest request, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, ct);
         var old = await LockToken(request.RefreshToken, ct);
         var now = clock.GetUtcNow().UtcDateTime;
         if (old is null) return InvalidToken();
@@ -86,7 +86,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
     public async Task<IActionResult> Revoke(RefreshRequest request, CancellationToken ct)
     {
         // Possession of the secret refresh token authorizes logout, even after JWT expiry.
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, ct);
         var token = await LockToken(request.RefreshToken, ct);
         if (token is not null)
             await RevokeFamily(token.FamilyId, clock.GetUtcNow().UtcDateTime, ct);
@@ -99,7 +99,7 @@ public sealed class AuthController(AuthDbContext db, TokenService tokens,
         var hash = TokenService.Hash(raw);
         // Materialize before SingleOrDefault: FOR UPDATE must remain at the end of SQL.
         var rows = await db.RefreshTokens
-            .FromSqlInterpolated($"SELECT * FROM RefreshTokens WHERE TokenHash = {hash} FOR UPDATE")
+            .FromSqlInterpolated($"""SELECT * FROM "RefreshTokens" WHERE "TokenHash" = {hash} FOR UPDATE""")
             .ToListAsync(ct);
         return rows.SingleOrDefault();
     }

@@ -3,6 +3,7 @@ using SwiftRide.Contracts.Payments;
 using SwiftRide.PaymentService.Application.Messaging;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Domain.Enums;
+using SwiftRide.PaymentService.Application.Exceptions;
 
 namespace SwiftRide.PaymentService.Application.Consumers;
 
@@ -24,9 +25,9 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
 
         if (payment.Status != nameof(PaymentStatus.Succeeded))
         {
-            throw new InvalidOperationException(
+            throw new PaymentCommandRejectedException(
                 $"Không thể phát PaymentSucceededV1 " +
-                $"cho Payment có trạng thái '{payment.Status}'.");
+                $"cho Payment có trạng thái 'DIL3'.");
         }
 
         await context.Publish(

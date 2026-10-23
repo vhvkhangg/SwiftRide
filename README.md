@@ -6,7 +6,7 @@ SwiftRide là bài tập lớn môn **Kiến trúc Phần mềm**. Hệ thống 
 
 Repository scaffold này ưu tiên **luồng cơ bản chạy được trước**. Core gồm:
 
-- **API Gateway** dùng YARP, là điểm vào chung cho client.
+- **API Gateway** dùng Ocelot, là điểm vào chung cho client.
 - **Trip Service** quản lý vòng đời chuyến đi / state machine.
 - **Matching & Pricing Service** tìm tài xế và tính giá.
 - **Payment Service** xử lý thanh toán, ledger/refund và idempotency ở giai đoạn triển khai nghiệp vụ.
@@ -26,7 +26,7 @@ Bản React/Vite trong `frontend/` được giữ làm bản tham chiếu cũ, k
 Client (React Native: Rider / Driver; demo chưa nối API)
         |
         v
-API Gateway (YARP + JWT)
+API Gateway (Ocelot + JWT)
         |
         +--------------------+--------------------+
         |                    |                    |
@@ -60,7 +60,7 @@ Luồng mục tiêu của bài:
 | Language | C# |
 | Runtime / Framework | .NET 10 LTS / ASP.NET Core |
 | API style | Minimal API hoặc Controllers |
-| API Gateway | YARP |
+| API Gateway | Ocelot |
 | Authentication | JWT Bearer; OAuth2/OIDC có thể tích hợp sau |
 | Trip data | PostgreSQL + EF Core 10 + Npgsql |
 | Matching/Pricing data | MongoDB + MongoDB.Driver |
@@ -178,4 +178,4 @@ Package này là **khung khởi tạo**, chưa chứa implementation nghiệp v�
 
 ## Authentication tại Gateway
 
-API Gateway đã tích hợp Auth trực tiếp với MySQL, JWT, refresh token rotation/replay detection và YARP identity headers. Toàn bộ solution dùng .NET 10; Gateway giữ EF Core/Pomelo 9 để tương thích MySQL provider. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose yêu cầu thêm AUTH_DB_PASSWORD, AUTH_DB_ROOT_PASSWORD và JWT_SECRET_KEY trong .env.
+API Gateway đã tích hợp Auth trực tiếp với PostgreSQL, JWT, refresh token rotation/replay detection và Ocelot identity headers. Toàn bộ solution dùng .NET 10; Gateway dùng EF Core 10/Npgsql. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose có giá trị mặc định để test local; có thể override AUTH_DB_PASSWORD và JWT_SECRET_KEY trong .env. Xem docs/gateway-docker-test.md.

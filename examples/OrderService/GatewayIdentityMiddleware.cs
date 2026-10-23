@@ -39,13 +39,13 @@ public sealed class GatewayIdentityMiddleware(RequestDelegate next, IPAddress ga
     }
 }
 
-// In OrderService Program.cs:
-// builder.Services.AddAuthorization();
-// app.UseRouting();
-// app.UseMiddleware<GatewayIdentityMiddleware>(IPAddress.Parse("10.0.0.10"));
-// app.UseAuthorization();
-// app.MapGet("/api/orders/me", (HttpContext ctx) =>
-//     Results.Ok(new { UserId = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier) }))
-//     .RequireAuthorization();
-// app.MapGet("/api/orders/admin", () => Results.Ok())
-//     .RequireAuthorization(policy => policy.RequireRole("Admin"));
+In OrderService Program.cs:
+builder.Services.AddAuthorization();
+app.UseRouting();
+app.UseMiddleware<GatewayIdentityMiddleware>(IPAddress.Parse("10.0.0.10"));
+app.UseAuthorization();
+app.MapGet("/api/orders/me", (HttpContext ctx) =>
+    Results.Ok(new { UserId = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier) }))
+    .RequireAuthorization();
+app.MapGet("/api/orders/admin", () => Results.Ok())
+    .RequireAuthorization(policy => policy.RequireRole("Admin"));

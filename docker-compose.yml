@@ -1,3 +1,4 @@
+# Local development/test stack. Default credentials and JWT key are public test values only.
 services:
   rabbitmq:
     image: rabbitmq:4.1.8-management
@@ -143,19 +144,18 @@ services:
     ports:
       - "5103:8080"
 
-  auth-mysql:
-    image: mysql:8.4
+  auth-postgres:
+    image: postgres:18
     environment:
-      MYSQL_DATABASE: swiftride_auth
-      MYSQL_USER: swiftride
-      MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:?Set AUTH_DB_ROOT_PASSWORD}
+      POSTGRES_DB: swiftride_auth
+      POSTGRES_USER: swiftride
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-gateway_test_password}
     ports:
-      - "127.0.0.1:3306:3306"
+      - "127.0.0.1:5435:5432"
     volumes:
-      - auth-mysql-data:/var/lib/mysql
+      - auth-postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u $$MYSQL_USER -D $$MYSQL_DATABASE -e 'SELECT 1'"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -167,13 +167,16 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
       AuthDatabase__EnsureCreated: "true"
-      ConnectionStrings__AuthDb: Server=auth-mysql;Port=3306;Database=swiftride_auth;User=swiftride;Password=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
-      JwtSettings__SecretKey: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
-      ReverseProxy__Clusters__trip-cluster__Destinations__destination1__Address: http://trip-service:8080/
-      ReverseProxy__Clusters__matching-cluster__Destinations__destination1__Address: http://matching-service:8080/
-      ReverseProxy__Clusters__payment-cluster__Destinations__destination1__Address: http://payment-service:8080/
+      ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:-gateway_test_password}
+      JwtSettings__SecretKey: ${JWT_SECRET_KEY:-swiftride-local-test-only-signing-key-at-least-32-bytes-2026}
+      Routes__0__DownstreamHostAndPorts__0__Host: trip-service
+      Routes__0__DownstreamHostAndPorts__0__Port: 8080
+      Routes__1__DownstreamHostAndPorts__0__Host: matching-service
+      Routes__1__DownstreamHostAndPorts__0__Port: 8080
+      Routes__2__DownstreamHostAndPorts__0__Host: payment-service
+      Routes__2__DownstreamHostAndPorts__0__Port: 8080
     depends_on:
-      auth-mysql:
+      auth-postgres:
         condition: service_healthy
       trip-service:
         condition: service_started
@@ -185,8 +188,7 @@ services:
       - "5100:8080"
 
 volumes:
-  rabbitmq-data:
-  auth-mysql-data:
+  auth-postgres-data:
   trip-postgres-data:
   matching-mongo-data:
   payment-postgres-data:
