@@ -8,4 +8,5 @@
     <PackageReference Include="MongoDB.Driver" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
+  <ItemGroup><Compile Include="../Shared/ServiceSecurity.cs" Link="Security/ServiceSecurity.cs" /></ItemGroup>
 </Project>

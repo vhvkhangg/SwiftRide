@@ -102,6 +102,7 @@ public sealed class TripApplicationService : ITripApplicationService
         if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
 
         trip.Dropoff();
+        trip.MarkPaymentPending();
         await _writer.SaveAsync(trip, ct);
     }
 

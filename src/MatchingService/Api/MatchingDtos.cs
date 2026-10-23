@@ -45,7 +45,7 @@ public sealed record MatchResponseDto(string TripId, IReadOnlyList<MatchedDriver
 /// <summary>Payload used by a driver app to publish its GPS location.</summary>
 public sealed record DriverLocationRequestDto
 {
-    [Required] public required string DriverId { get; init; }
+    public string? DriverId { get; init; }
     [Range(-90, 90)] public double Latitude { get; init; }
     [Range(-180, 180)] public double Longitude { get; init; }
     public bool IsAvailable { get; init; }

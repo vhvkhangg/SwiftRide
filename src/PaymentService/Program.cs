@@ -1,3 +1,4 @@
+using SwiftRide.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
@@ -19,12 +20,11 @@ builder.Services.AddScoped<
     IPaymentApplicationService,
     PaymentApplicationService>();
 
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer();
+builder.Services.AddServiceSecurity(builder.Configuration);
 
-builder.Services.AddAuthorization();
 
+
+builder.Services.AddTransient<InternalTripHandler>();
 builder.Services.AddHttpClient<
     ITripServiceClient,
     TripServiceClient
@@ -35,7 +35,7 @@ builder.Services.AddHttpClient<
 
     client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(5);
-});
+}).AddHttpMessageHandler<InternalTripHandler>();
 
 var app = builder.Build();
 
@@ -91,4 +91,9 @@ app.MapGet(
 app.UseAuthentication();
 app.UseAuthorization();
 
+if (builder.Configuration.GetValue<bool>("Database:Migrate"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<PaymentDbContext>().Database.MigrateAsync();
+}
 app.Run();

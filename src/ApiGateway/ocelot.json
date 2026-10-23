@@ -9,7 +9,7 @@
         "PATCH",
         "DELETE"
       ],
-      "DownstreamPathTemplate": "/api/trips/{everything}",
+      "DownstreamPathTemplate": "/trips/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
@@ -19,12 +19,11 @@
       ]
     },
     {
-      "UpstreamPathTemplate": "/api/matching/{everything}",
+      "UpstreamPathTemplate": "/api/matching/quote",
       "UpstreamHttpMethod": [
-        "GET",
         "POST"
       ],
-      "DownstreamPathTemplate": "/api/matching/{everything}",
+      "DownstreamPathTemplate": "/quote",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
@@ -39,7 +38,7 @@
         "GET",
         "POST"
       ],
-      "DownstreamPathTemplate": "/api/payments/{everything}",
+      "DownstreamPathTemplate": "/payments/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
@@ -100,6 +99,34 @@
       "AuthenticationOptions": {
         "AllowAnonymous": true
       }
+    },
+    {
+      "UpstreamPathTemplate": "/api/matching/match",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamPathTemplate": "/match",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 5102
+        }
+      ]
+    },
+    {
+      "UpstreamPathTemplate": "/api/drivers/location",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamPathTemplate": "/api/drivers/location",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 5102
+        }
+      ]
     }
   ],
   "GlobalConfiguration": {

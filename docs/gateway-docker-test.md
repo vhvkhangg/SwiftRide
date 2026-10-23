@@ -1,40 +1,46 @@
-# Test Gateway Auth với PostgreSQL
+# Test Gateway trên Docker
 
-File độc lập: docker-compose.gateway-test.yml ở thư mục gốc. Không cần file .env; credentials và JWT key công khai trong file chỉ dành cho test local. Chạy lệnh tại D:SwiftRide. Cần Docker Desktop đang chạy Linux containers.
+Dùng duy nhất docker-compose.yml cho toàn bộ backend. Cần Docker Desktop chạy Linux containers.
+
+1. Copy .env.example thành .env.
+2. Điền AUTH_DB_PASSWORD và JWT_SECRET_KEY. Có thể sinh key trong PowerShell 7:
+   [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(64))
+3. Đặt SERVICE_AUTH_SECRET_KEY khác JWT_SECRET_KEY (Compose có fallback local chỉ dành test).
+4. Chạy từ thư mục D:/SwiftRide:
 
 ~~~powershell
-docker compose -f docker-compose.gateway-test.yml up --build -d
-docker compose -f docker-compose.gateway-test.yml logs -f api-gateway
+docker compose up --build -d
+docker compose logs -f api-gateway
 ~~~
 
-Chờ log Gateway báo listening trên port 8080, sau đó:
+Chờ các service khởi động/migrate xong:
 
 ~~~powershell
 Invoke-RestMethod http://localhost:5100/health
+pwsh -File tests/Gateway.Security/gateway-security.ps1
+~~~
+
+Tài khoản demo:
+- rider.demo@example.com
+- driver.demo@example.com
+- driver.other@example.com
+
+Mật khẩu mặc định: SwiftRide-demo-2026!; override bằng DEV_ACCOUNT_PASSWORD và tham số -SeedPassword của test. Seed chỉ tạo user chưa tồn tại, không reset tài khoản cũ.
+
+Test rotation/logout riêng (chờ ít nhất một phút sau suite trước để không vượt auth rate limit):
+
+~~~powershell
 pwsh -File tests/ApiGateway.Smoke/auth-smoke.ps1
 ~~~
 
-Script yêu cầu PowerShell 7 và kiểm tra đăng ký, trùng email, login, refresh rotation, replay/family revocation, logout và JWT bắt buộc. Rate limit là 20 requests/phút/IP: nếu chạy script lại ngay bị 429, chờ ít nhất một phút.
-
-PostgreSQL cho pgAdmin/DBeaver:
-- Host: localhost
-- Port: 5435
-- Database: swiftride_auth
-- Username: swiftride
-- Password: gateway_test_password
-
-Compose chỉ chạy Gateway + PostgreSQL, chưa khởi động downstream services. Vì vậy protected request không JWT trả 401; request JWT hợp lệ tới route proxy có thể trả 502 do downstream chưa chạy. Không dùng file này để xác nhận forwarding/header enrichment. Các endpoint /auth/* và /health chạy nội bộ.
+AuthDb: localhost:5435, database swiftride_auth, username swiftride, password theo AUTH_DB_PASSWORD. JWT và service keys không dùng lại ở production.
 
 Dừng containers và giữ dữ liệu:
+
 ~~~powershell
-docker compose -f docker-compose.gateway-test.yml down
+docker compose down
 ~~~
 
-Xóa database test để chạy từ đầu (mất toàn bộ user/token của stack test):
-~~~powershell
-docker compose -f docker-compose.gateway-test.yml down -v
-~~~
+Không chạy down -v nếu muốn giữ dữ liệu. Trip/Payment dùng migrations, Auth dùng EnsureCreated cho database mới; không cần xóa toàn bộ database để thêm bảng invitation.
 
-Stack dùng project name và volume riêng, không dùng database của docker-compose.yml chính. Cổng 5100/5435 trùng stack chính: dừng stack chính trước nếu đang chạy. EnsureCreated chỉ tạo schema mới; nếu schema test cũ không tương thích, dùng database test mới hoặc reset volume test.
-
-Cấu hình đã được kiểm tra bằng docker compose config --quiet. Chưa chạy containers trong môi trường tạo file.
+Routes và thiết kế quyền chi tiết ở gateway-auth.md. Products/Orders là route mẫu, chưa có service triển khai.

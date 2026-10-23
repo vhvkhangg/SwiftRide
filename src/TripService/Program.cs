@@ -1,3 +1,4 @@
+using SwiftRide.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.TripService.Api;
@@ -8,11 +9,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<TripDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("TripDb")));
 
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer();
+builder.Services.AddServiceSecurity(builder.Configuration);
 
-builder.Services.AddAuthorization();
+
 
 // --- Đăng ký Dependency Injection (DI) ---
 builder.Services.AddScoped<SwiftRide.TripService.Domain.Interfaces.ITripReader, SwiftRide.TripService.Infrastructure.Repositories.TripRepository>();
@@ -30,4 +29,9 @@ app.MapTripEndpoints();
 app.UseAuthentication();
 app.UseAuthorization();
 
+if (builder.Configuration.GetValue<bool>("Database:Migrate"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<TripDbContext>().Database.MigrateAsync();
+}
 app.Run();

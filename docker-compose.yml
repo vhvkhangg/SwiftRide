@@ -1,3 +1,8 @@
+x-service-security: &service-security
+  JwtSettings__Issuer: SwiftRide.Gateway
+  JwtSettings__Audience: SwiftRide.Client
+  JwtSettings__SecretKey: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
+  ServiceAuth__SecretKey: ${SERVICE_AUTH_SECRET_KEY:-swiftride-internal-only-development-key-at-least-32-bytes}
 services:
   trip-postgres:
     image: postgres:18
@@ -48,7 +53,9 @@ services:
       context: .
       dockerfile: src/TripService/Dockerfile
     environment:
+      <<: *service-security
       ASPNETCORE_URLS: http://+:8080
+      Database__Migrate: "true"
       ConnectionStrings__TripDb: Host=trip-postgres;Port=5432;Database=${TRIP_DB_NAME:-swiftride_trip};Username=${TRIP_DB_USER:-swiftride};Password=${TRIP_DB_PASSWORD:-swiftride_dev}
     depends_on:
       trip-postgres:
@@ -61,7 +68,10 @@ services:
       context: .
       dockerfile: src/MatchingService/Dockerfile
     environment:
+      <<: *service-security
       ASPNETCORE_URLS: http://+:8080
+      ServiceAuth__ServiceName: matching-service
+      Services__TripService__BaseUrl: http://trip-service:8080/
       ConnectionStrings__MatchDb: mongodb://matching-mongodb:27017/${MATCH_DB_NAME:-swiftride_matching}
     depends_on:
       matching-mongodb:
@@ -74,7 +84,11 @@ services:
       context: .
       dockerfile: src/PaymentService/Dockerfile
     environment:
+      <<: *service-security
       ASPNETCORE_URLS: http://+:8080
+      Database__Migrate: "true"
+      ServiceAuth__ServiceName: payment-service
+      Services__TripService__BaseUrl: http://trip-service:8080/
       ConnectionStrings__PaymentDb: Host=payment-postgres;Port=5432;Database=${PAYMENT_DB_NAME:-swiftride_payment};Username=${PAYMENT_DB_USER:-swiftride};Password=${PAYMENT_DB_PASSWORD:-swiftride_dev}
     depends_on:
       payment-postgres:
@@ -105,6 +119,8 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
       AuthDatabase__EnsureCreated: "true"
+      DevelopmentAccounts__Enabled: "true"
+      DevelopmentAccounts__Password: ${DEV_ACCOUNT_PASSWORD:-SwiftRide-demo-2026!}
       ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD}
       JwtSettings__SecretKey: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
       Routes__0__DownstreamHostAndPorts__0__Host: trip-service
@@ -113,6 +129,10 @@ services:
       Routes__1__DownstreamHostAndPorts__0__Port: 8080
       Routes__2__DownstreamHostAndPorts__0__Host: payment-service
       Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Routes__6__DownstreamHostAndPorts__0__Host: matching-service
+      Routes__6__DownstreamHostAndPorts__0__Port: 8080
+      Routes__7__DownstreamHostAndPorts__0__Host: matching-service
+      Routes__7__DownstreamHostAndPorts__0__Port: 8080
     depends_on:
       auth-postgres:
         condition: service_healthy

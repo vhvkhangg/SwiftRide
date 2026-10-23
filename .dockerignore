@@ -1,0 +1,15 @@
+.git
+.vs
+.idea
+.codex
+.agents
+.data
+**/bin
+**/obj
+**/node_modules
+**/TestResults
+.env
+.env.*
+**/secrets.json
+**/appsettings.*.local.json
+**/*.log

@@ -19,7 +19,7 @@ public sealed class TripServiceClient : ITripServiceClient
     )
     {
         using var response = await _httpClient.GetAsync(
-            $"trips/{tripId:D}",
+            $"internal/trips/{tripId:D}",
             cancellationToken
         );
 
@@ -39,7 +39,7 @@ public sealed class TripServiceClient : ITripServiceClient
     )
     {
         using var response = await _httpClient.PostAsync(
-            $"trips/{tripId:D}/pay",
+            $"internal/trips/{tripId:D}/pay",
             content: null,
             cancellationToken: cancellationToken
         );

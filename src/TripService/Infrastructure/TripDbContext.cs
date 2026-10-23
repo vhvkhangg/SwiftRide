@@ -10,10 +10,15 @@ public sealed class TripDbContext(DbContextOptions<TripDbContext> options)
     // Đại diện cho bảng Trips trong DB
     public DbSet<Trip> Trips { get; set; } = null!;
 
+    public DbSet<DriverInvitation> DriverInvitations => Set<DriverInvitation>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Áp dụng file cấu hình TripConfiguration
         modelBuilder.ApplyConfiguration(new TripConfiguration());
+        modelBuilder.Entity<Trip>().Property<uint>("Version").IsRowVersion();
+        var invitation = modelBuilder.Entity<DriverInvitation>();
+        invitation.HasKey(x => new { x.TripId, x.DriverId });
+        invitation.HasOne<Trip>().WithMany().HasForeignKey(x => x.TripId).OnDelete(DeleteBehavior.Cascade);
         base.OnModelCreating(modelBuilder);
     }
 }

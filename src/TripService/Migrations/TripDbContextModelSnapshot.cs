@@ -22,6 +22,22 @@ namespace SwiftRide.TripService.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("SwiftRide.TripService.Domain.Entities.DriverInvitation", b =>
+                {
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("TripId", "DriverId");
+
+                    b.ToTable("DriverInvitations");
+                });
+
             modelBuilder.Entity("SwiftRide.TripService.Domain.Entities.Trip", b =>
                 {
                     b.Property<Guid>("Id")
@@ -58,9 +74,24 @@ namespace SwiftRide.TripService.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.ToTable("Trips");
+                });
+
+            modelBuilder.Entity("SwiftRide.TripService.Domain.Entities.DriverInvitation", b =>
+                {
+                    b.HasOne("SwiftRide.TripService.Domain.Entities.Trip", null)
+                        .WithMany()
+                        .HasForeignKey("TripId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }
