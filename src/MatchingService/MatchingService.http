@@ -1,37 +1,67 @@
-@baseUrl = http://localhost:5000
+@baseUrl = http://localhost:5100
+@password = SwiftRide-demo-2026!
 
-### Health
+### 1. Lấy Token cho Rider
+# @name loginRider
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "rider.demo@example.com",
+  "password": "{{password}}"
+}
+
+### Gán token của Rider vào biến
+@riderToken = 
+
+### 2. Lấy Token cho Driver
+# @name loginDriver
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "driver.demo@example.com",
+  "password": "{{password}}"
+}
+
+### Gán token của Driver vào biến
+@driverToken = 
+
+--- DƯỚI ĐÂY LÀ PHẦN TEST MODULE CỦA BẠN ---
+
+### Health Check (Không cần Auth)
 GET {{baseUrl}}/health
 
-### Quote
-POST {{baseUrl}}/quote
+### Tính báo giá chuyến đi (Rider)
+POST {{baseUrl}}/api/matching/quote
+Authorization: Bearer {{riderToken}}
 Content-Type: application/json
 
 {
   "distance": 8.5,
   "estimatedTime": 22,
   "rideType": "Car",
-  "surge": 1.2,
-  "promoCode": "WELCOME10"
+  "promoCode": "SWIFTRIDE2026"
 }
 
-### Update driver location
+### Cập nhật vị trí tài xế (Driver)
 POST {{baseUrl}}/api/drivers/location
+Authorization: Bearer {{driverToken}}
 Content-Type: application/json
 
 {
-  "driverId": "driver-001",
   "latitude": 10.7769,
   "longitude": 106.7009,
   "isAvailable": true
 }
 
-### Match drivers
-POST {{baseUrl}}/match
+### Tìm tài xế xung quanh (Rider)
+POST {{baseUrl}}/api/matching/match
+Authorization: Bearer {{riderToken}}
 Content-Type: application/json
 
 {
-  "tripId": "trip-001",
+  "tripId": "123e4567-e89b-12d3-a456-426614174000",
   "pickupLatitude": 10.7769,
   "pickupLongitude": 106.7009,
   "radiusKm": 5
