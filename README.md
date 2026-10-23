@@ -18,7 +18,7 @@ Repository scaffold này ưu tiên **luồng cơ bản chạy được trước*
 
 Frontend chính chuyển sang **React Native + Expo + TypeScript** trong `mobile/`: hai ứng dụng **SwiftRide Rider** và **SwiftRide Driver** có entry, tên, icon, application ID và cấu hình build độc lập. UI dùng thành phần native, không bọc web bằng WebView. Bản demo chưa gọi backend, hai app chưa đồng bộ chuyến. Xem `mobile/README.md` để chạy trên điện thoại và build Android.
 
-Bản React/Vite trong `frontend/` được giữ làm bản tham chiếu cũ, không phải dependency của mobile và không còn là hướng phát triển chính.
+Bản React/Vite cũ đã được gỡ bỏ. Chỉ phát triển giao diện trong `mobile/`, bao gồm cả preview web bằng Expo.
 
 ## 2. Kiến trúc
 

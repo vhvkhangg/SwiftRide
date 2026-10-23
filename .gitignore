@@ -1,4 +1,7 @@
 # Build results
+node_modules/
+dist/
+playwright-output/
 [Bb]in/
 [Oo]bj/
 [Aa]rtifacts/
