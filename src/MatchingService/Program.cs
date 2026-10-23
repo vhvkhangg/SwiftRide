@@ -1,14 +1,23 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using SwiftRide.Messaging;
 using MongoDB.Driver;
 using SwiftRide.MatchingService.Api;
 using SwiftRide.MatchingService.Application.Interfaces;
 using SwiftRide.MatchingService.Application.Services;
+using SwiftRide.MatchingService.Application.Consumers;
 using SwiftRide.MatchingService.Domain.Interfaces;
 using SwiftRide.MatchingService.Infrastructure.Repositories;
 using SwiftRide.MatchingService.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSwiftRideMessaging(builder.Configuration, "matching", consumers =>
+{
+    // Gắn đúng queue đã được Messaging.Setup tạo; retry chung vẫn áp dụng.
+    consumers.AddConsumer<TripRequestedConsumer>()
+        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.MatchingTripRequested);
+});
 
 var mongoConnectionString = builder.Configuration.GetConnectionString("MatchDb")
     ?? throw new InvalidOperationException("Chuỗi kết nối 'MatchDb' là bắt buộc.");
@@ -33,6 +42,9 @@ builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
 var app = builder.Build();
+
+// Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.UseExceptionHandler();
 if (app.Environment.IsDevelopment())

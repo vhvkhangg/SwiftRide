@@ -1,5 +1,39 @@
 # Local development/test stack. Default credentials and JWT key are public test values only.
 services:
+  rabbitmq:
+    image: rabbitmq:4.1.8-management
+    hostname: swiftride-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-swiftride}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-swiftride_dev}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-swiftride}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_local_alarms"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  messaging-setup:
+    build:
+      context: .
+      dockerfile: src/SwiftRide.Messaging.Setup/Dockerfile
+    environment:
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-swiftride}
+      RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
   trip-postgres:
     image: postgres:18
     environment:
@@ -51,7 +85,16 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__TripDb: Host=trip-postgres;Port=5432;Database=${TRIP_DB_NAME:-swiftride_trip};Username=${TRIP_DB_USER:-swiftride};Password=${TRIP_DB_PASSWORD:-swiftride_dev}
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-swiftride}
+      RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
     depends_on:
+      rabbitmq:
+        condition: service_healthy
+      messaging-setup:
+        condition: service_completed_successfully
       trip-postgres:
         condition: service_healthy
     ports:
@@ -64,9 +107,18 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__MatchDb: mongodb://matching-mongodb:27017/${MATCH_DB_NAME:-swiftride_matching}
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-swiftride}
+      RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
     depends_on:
+      rabbitmq:
+        condition: service_healthy
       matching-mongodb:
         condition: service_healthy
+      messaging-setup:
+        condition: service_completed_successfully
     ports:
       - "5102:8080"
 
@@ -77,9 +129,18 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__PaymentDb: Host=payment-postgres;Port=5432;Database=${PAYMENT_DB_NAME:-swiftride_payment};Username=${PAYMENT_DB_USER:-swiftride};Password=${PAYMENT_DB_PASSWORD:-swiftride_dev}
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-swiftride}
+      RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
     depends_on:
+      rabbitmq:
+        condition: service_healthy
       payment-postgres:
         condition: service_healthy
+      messaging-setup:
+        condition: service_completed_successfully
     ports:
       - "5103:8080"
 

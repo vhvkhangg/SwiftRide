@@ -4,6 +4,7 @@ using SwiftRide.PaymentService.Domain.Entities;
 using SwiftRide.PaymentService.Domain.Enums;
 using SwiftRide.PaymentService.Domain.Exceptions;
 using SwiftRide.PaymentService.Domain.Repositories;
+using SwiftRide.PaymentService.Application.Exceptions;
 
 namespace SwiftRide.PaymentService.Application.Services;
 
@@ -19,121 +20,90 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     }
 
     public async Task<PaymentResponse> CreatePaymentAsync(
-        CreatePaymentRequest request, CancellationToken cancellationToken = default)
+        CreatePaymentRequest request,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        if (request.TripId == Guid.Empty)
-            throw new ArgumentException("ID chuyến đi không được để trống.");
-        if (request.Amount <= 0 || decimal.Round(request.Amount, 2) != request.Amount)
-            throw new ArgumentException("Số tiền không hợp lệ.");
-        ValidateText(request.IdempotencyKey, nameof(request.IdempotencyKey));
-        ValidateText(request.PayerAccount, nameof(request.PayerAccount));
-        ValidateText(request.PayeeAccount, nameof(request.PayeeAccount));
+        ValidateRequest(request);
 
         var existing = await _payments.GetByIdempotencyKeyAsync(
-            request.IdempotencyKey, cancellationToken);
+            request.IdempotencyKey,
+            cancellationToken
+        );
+
         if (existing is not null)
-            return await HandleExistingAsync(existing, request, cancellationToken);
-
-        var existingTripPayment = await _payments.GetSettledByTripIdAsync(request.TripId, cancellationToken);
-
-        if (existingTripPayment is not null)
         {
-            throw new InvalidOperationException(
-                "Trip đã có Payment được ghi nhận. " +
-                "Không thể thanh toán lại bằng IdempotencyKey khác.");
+            EnsureSamePayload(existing, request);
+
+            var synced = await SyncTripAsync(existing, cancellationToken);
+
+            return PaymentResponse.From(synced);
         }
 
-        var trip = await _trips.GetByIdAsync(request.TripId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{request.TripId}'.");
-        if (trip.Status != TripStatusCode.PaymentPending)
-            throw new InvalidOperationException($"Trip chưa cho phép thanh toán: '{trip.Status}'.");
-        if (trip.RiderId == Guid.Empty || trip.DriverId is null || trip.DriverId == Guid.Empty)
-            throw new InvalidOperationException("Trip thiếu RiderId hoặc DriverId hợp lệ.");
-        if (trip.FareEstimate is null || trip.FareEstimate <= 0)
-            throw new InvalidOperationException("Trip chưa có giá tiền hợp lệ.");
-        if (request.Amount != trip.FareEstimate.Value)
-            throw new InvalidOperationException("Số tiền khác với giá của Trip.");
+        await EnsureTripNotSettledAsync(
+            request.TripId,
+            cancellationToken
+        );
 
-        var payer = $"rider-{trip.RiderId:D}";
-        var payee = $"driver-{trip.DriverId.Value:D}";
-        if (!string.Equals(request.PayerAccount, payer, StringComparison.Ordinal) ||
-            !string.Equals(request.PayeeAccount, payee, StringComparison.Ordinal))
-            throw new InvalidOperationException("Tài khoản thanh toán không khớp Trip.");
+        var trip = await _trips.GetByIdAsync(
+            request.TripId,
+            cancellationToken
+        ) ?? throw new KeyNotFoundException(
+            $"Không tìm thấy chuyến đi '{request.TripId}'.");
 
-        var payment = Payment.Create(trip.Id, trip.FareEstimate.Value,
-            request.IdempotencyKey, payer, payee);
-        var entries = new[]
-        {
-            LedgerEntry.Create(payment.Id, LedgerEntryType.Debit, payer, payment.Amount),
-            LedgerEntry.Create(payment.Id, LedgerEntryType.Credit, payee, payment.Amount)
-        };
-        payment.MarkSucceeded();
-        try
-        {
-            await _payments.AddAsync(payment, cancellationToken);
-            await _payments.AddLedgerEntriesAsync(entries, cancellationToken);
-            await _payments.SaveChangesAsync(cancellationToken);
-        }
-        catch (DuplicateIdempotencyKeyException)
-        {
-            var winner = await _payments.GetByIdempotencyKeyAsync(
-                request.IdempotencyKey, cancellationToken);
-            if (winner is null)
-                throw new InvalidOperationException(
-                    "Không tải được Payment sau khi trùng key. Hãy retry cùng key.");
-            return await HandleExistingAsync(winner, request, cancellationToken);
-        }
-        catch (TripAlreadyPaidException ex)
-        {
-            throw new InvalidOperationException(
-                "Trip vừa được thanh toán bởi request khác.",
-                ex);
-        }
+        ValidateTrip(trip, request);
+
+        var payment = await StoreNewPaymentAsync(request, cancellationToken);
 
         payment = await SyncTripAsync(payment, cancellationToken);
+
         return PaymentResponse.From(payment);
     }
 
-    private async Task<PaymentResponse> HandleExistingAsync(
-        Payment payment, CreatePaymentRequest request, CancellationToken ct)
+    public async Task<PaymentResponse> ProcessPaymentCommandAsync(
+        CreatePaymentRequest request,
+        CancellationToken cancellationToken = default)
     {
-        if (payment.TripId != request.TripId || payment.Amount != request.Amount ||
-            !string.Equals(payment.PayerAccount, request.PayerAccount, StringComparison.Ordinal) ||
-            !string.Equals(payment.PayeeAccount, request.PayeeAccount, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                "IdempotencyKey đã được sử dụng cho payload khác.");
+        ValidateRequest(request);
 
-        payment = await SyncTripAsync(payment, ct);
+        var existing = await _payments.GetByIdempotencyKeyAsync(
+            request.IdempotencyKey,
+            cancellationToken
+        );
+
+        if (existing is not null)
+        {
+            if (!HasSamePayload(existing, request))
+            {
+                throw new PaymentCommandRejectedException(
+                    "IdempotencyKey đã được sử dụng cho payload khác.");
+            }
+
+            if (existing.Status != PaymentStatus.Succeeded)
+            {
+                throw new PaymentCommandRejectedException(
+                    $"Payment với IdempotencyKey này đang ở " +
+                    $"trạng thái '{existing.Status}'.");
+            }
+
+            return PaymentResponse.From(existing);
+        }
+
+        var settled = await _payments.GetSettledByTripIdAsync(request.TripId, cancellationToken);
+
+        if (settled is not null)
+        {
+            throw new PaymentCommandRejectedException(
+                "Trip đã có Payment Succeeded hoặc Refunded. " +
+                "Không thể thanh toán bằng IdempotencyKey khác.");
+        }
+
+        var payment = await StoreNewPaymentAsync(
+            request,
+            cancellationToken,
+            recoverUniqueViolation: false
+        );
+
         return PaymentResponse.From(payment);
-    }
-
-    private async Task<Payment> SyncTripAsync(Payment payment, CancellationToken ct)
-    {
-        if (payment.Status != PaymentStatus.Succeeded || payment.IsTripSynced)
-            return payment;
-
-        await _trips.MarkPaidAsync(payment.TripId, ct);
-        payment.MarkTripSynced();
-        try
-        {
-            await _payments.SaveChangesAsync(ct);
-            return payment;
-        }
-        catch (ConcurrentPaymentUpdateException)
-        {
-            var latest = await _payments.GetByIdAsync(payment.Id, ct);
-            if (latest is not null && latest.IsTripSynced)
-                return latest;
-
-            throw;
-        }
-    }
-
-    private static void ValidateText(string? value, string field)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 128)
-            throw new ArgumentException($"{field} phải có từ 1 đến 128 ký tự.");
     }
 
     public async Task<PaymentResponse?> GetPaymentByIdAsync(
@@ -199,7 +169,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 "Ledger gốc không hợp lệ. " +
                 "Không thể thực hiện refund.");
         }
-        
+
         payment.Refund();
         var reversal = original.Select(x => LedgerEntry.Create(payment.Id,
             x.Type == LedgerEntryType.Debit ? LedgerEntryType.Credit : LedgerEntryType.Debit,
@@ -207,5 +177,245 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         await _payments.AddLedgerEntriesAsync(reversal, cancellationToken);
         await _payments.SaveChangesAsync(cancellationToken);
         return RefundPaymentResponse.From(payment);
+    }
+
+    private async Task<Payment> StoreNewPaymentAsync(
+        CreatePaymentRequest request,
+        CancellationToken ct,
+        bool recoverUniqueViolation = true
+    )
+    {
+        var payment = Payment.Create(
+            request.TripId,
+            request.Amount,
+            request.IdempotencyKey,
+            request.PayerAccount,
+            request.PayeeAccount
+        );
+
+        var entries = new[]
+        {
+            LedgerEntry.Create(
+                payment.Id,
+                LedgerEntryType.Debit,
+                payment.PayerAccount,
+                payment.Amount),
+
+            LedgerEntry.Create(
+                payment.Id,
+                LedgerEntryType.Credit,
+                payment.PayeeAccount,
+                payment.Amount)
+        };
+
+        payment.MarkSucceeded();
+
+        try
+        {
+            await _payments.AddAsync(payment, ct);
+
+            await _payments.AddLedgerEntriesAsync(entries, ct);
+
+            await _payments.SaveChangesAsync(ct);
+
+            return payment;
+        }
+        catch (DuplicateIdempotencyKeyException) when (recoverUniqueViolation)
+        {
+            var winner = await _payments.GetByIdempotencyKeyAsync(request.IdempotencyKey, ct);
+
+            if (winner is null)
+            {
+                throw new InvalidOperationException(
+                    "Không tải được Payment sau khi trùng key. " +
+                    "Hãy retry cùng key.");
+            }
+
+            EnsureSamePayload(winner, request);
+
+            return winner;
+        }
+        catch (TripAlreadyPaidException ex) when (recoverUniqueViolation)
+        {
+            throw new InvalidOperationException(
+                "Trip vừa được thanh toán bởi request khác.",
+                ex);
+        }
+    }
+
+    private async Task EnsureTripNotSettledAsync(
+        Guid tripId,
+        CancellationToken ct
+    )
+    {
+        var existing = await _payments.GetSettledByTripIdAsync(
+        tripId,
+        ct);
+
+        if (existing is not null)
+        {
+            throw new InvalidOperationException(
+                "Trip đã có Payment được ghi nhận. " +
+                "Không thể thanh toán lại bằng IdempotencyKey khác.");
+        }
+    }
+
+    private static bool HasSamePayload(
+        Payment payment,
+        CreatePaymentRequest request
+    )
+    {
+        return payment.TripId == request.TripId &&
+        payment.Amount == request.Amount &&
+        string.Equals(
+            payment.PayerAccount,
+            request.PayerAccount,
+            StringComparison.Ordinal) &&
+        string.Equals(
+            payment.PayeeAccount,
+            request.PayeeAccount,
+            StringComparison.Ordinal);
+    }
+
+    private static void EnsureSamePayload(
+        Payment payment,
+        CreatePaymentRequest request)
+    {
+        if (!HasSamePayload(payment, request))
+        {
+            throw new InvalidOperationException(
+            "IdempotencyKey đã được sử dụng cho payload khác.");
+        }
+    }
+
+    private static void ValidateTrip(
+        TripSnapshot trip,
+        CreatePaymentRequest request
+    )
+    {
+        if (trip.Id != request.TripId)
+        {
+            throw new InvalidOperationException(
+                "TripService trả về TripId không khớp.");
+        }
+
+        if (trip.Status != TripStatusCode.PaymentPending)
+        {
+            throw new InvalidOperationException(
+                $"Trip chưa cho phép thanh toán: '{trip.Status}'.");
+        }
+
+        if (trip.RiderId == Guid.Empty ||
+            trip.DriverId is null ||
+            trip.DriverId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "Trip thiếu RiderId hoặc DriverId hợp lệ.");
+        }
+
+        if (trip.FareEstimate is null ||
+            trip.FareEstimate <= 0)
+        {
+            throw new InvalidOperationException(
+                "Trip chưa có giá tiền hợp lệ.");
+        }
+
+        if (request.Amount != trip.FareEstimate.Value)
+        {
+            throw new InvalidOperationException(
+                "Số tiền khác với giá của Trip.");
+        }
+
+        var payer = $"rider-{trip.RiderId:D}";
+        var payee = $"driver-{trip.DriverId.Value:D}";
+
+        if (!string.Equals(
+                request.PayerAccount,
+                payer,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                request.PayeeAccount,
+                payee,
+                StringComparison.Ordinal)
+        )
+        {
+            throw new InvalidOperationException(
+                "Tài khoản thanh toán không khớp Trip.");
+        }
+    }
+
+    private async Task<Payment> SyncTripAsync(
+        Payment payment,
+        CancellationToken ct
+    )
+    {
+        if (payment.Status != PaymentStatus.Succeeded || payment.IsTripSynced)
+        {
+            return payment;
+        }
+
+        await _trips.MarkPaidAsync(payment.TripId, ct);
+
+        payment.MarkTripSynced();
+
+        try
+        {
+            await _payments.SaveChangesAsync(ct);
+            return payment;
+        }
+        catch (ConcurrentPaymentUpdateException)
+        {
+            var latest = await _payments.GetByIdAsync(payment.Id, ct);
+
+            if (latest is not null && latest.IsTripSynced)
+            {
+                return latest;
+            }
+
+            throw;
+        }
+    }
+
+    private static void ValidateRequest(
+    CreatePaymentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.TripId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "ID chuyến đi không được để trống.");
+        }
+
+        if (request.Amount <= 0 ||
+            decimal.Round(request.Amount, 2) != request.Amount)
+        {
+            throw new ArgumentException(
+                "Số tiền không hợp lệ.");
+        }
+
+        ValidateText(
+            request.IdempotencyKey,
+            nameof(request.IdempotencyKey));
+
+        ValidateText(
+            request.PayerAccount,
+            nameof(request.PayerAccount));
+
+        ValidateText(
+            request.PayeeAccount,
+            nameof(request.PayeeAccount));
+    }
+
+    private static void ValidateText(
+        string? value,
+        string field)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Length > 128)
+        {
+            throw new ArgumentException(
+                $"{field} phải có từ 1 đến 128 ký tự.");
+        }
     }
 }

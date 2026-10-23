@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using SwiftRide.Messaging;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Domain.Repositories;
@@ -7,11 +8,51 @@ using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Api.Endpoints;
 using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Infrastructure.Clients;
+using MassTransit;
+using SwiftRide.PaymentService.Application.Consumers;
+using SwiftRide.PaymentService.Application.Exceptions;
+using SwiftRide.PaymentService.Domain.Exceptions;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<PaymentDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("PaymentDb")));
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("PaymentDb")));
+
+builder.Services.AddSwiftRideMessaging(
+    builder.Configuration,
+    "payment",
+    registerConsumers: x =>
+    {
+        x.AddConsumer<ProcessPaymentConsumer>()
+            .Endpoint(e =>
+            {
+                e.Name = MessagingEndpoints.PaymentProcessPayment;
+            });
+
+        x.AddEntityFrameworkOutbox<PaymentDbContext>(o =>
+        {
+            o.UsePostgres();
+
+            o.DuplicateDetectionWindow = TimeSpan.FromHours(24);
+        });
+
+        x.AddConfigureEndpointsCallback((context, name, endpoint) =>
+        {
+            if (name == MessagingEndpoints.PaymentProcessPayment)
+            {
+                endpoint.UseEntityFrameworkOutbox<PaymentDbContext>(
+                    context);
+            }
+        });
+    },
+    configureRetry: retry =>
+    {
+        retry.Ignore<PaymentCommandRejectedException>();
+
+        retry.Ignore<TripAlreadyPaidException>();
+    }
+);
 
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 
@@ -38,6 +79,9 @@ builder.Services.AddHttpClient<
 });
 
 var app = builder.Build();
+
+// Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapPaymentEndpoints(app.Environment.IsDevelopment());
 

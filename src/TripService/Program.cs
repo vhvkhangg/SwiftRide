@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using SwiftRide.Messaging;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.TripService.Api;
 using SwiftRide.TripService.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip");
 
 builder.Services.AddDbContext<TripDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("TripDb")));
@@ -20,6 +23,9 @@ builder.Services.AddScoped<SwiftRide.TripService.Domain.Interfaces.ITripWriter, 
 builder.Services.AddScoped<SwiftRide.TripService.Application.Interfaces.ITripApplicationService, SwiftRide.TripService.Application.Services.TripApplicationService>();
 
 var app = builder.Build();
+
+// Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapGet("/health", () => Results.Ok(new { service = "trip-service", status = "ok" }))
     .AllowAnonymous();

@@ -11,5 +11,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="MassTransit.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SwiftRide.Contracts/SwiftRide.Contracts.csproj" />
+    <ProjectReference Include="../SwiftRide.Messaging/SwiftRide.Messaging.csproj" />
   </ItemGroup>
 </Project>
