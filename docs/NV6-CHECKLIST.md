@@ -63,7 +63,7 @@ Danh sách gợi ý để thảo luận, không phải quyết định đã đư
 | `docker-compose.yml` | Sửa | Thêm service rabbitmq, image có management, hostname ổn định, ports 5672/15672, volume, healthcheck và restart policy |
 | `.env.example` | Sửa | Thêm RABBITMQ_USER, RABBITMQ_PASSWORD, RABBITMQ_VHOST, ghi rõ giá trị mẫu dành cho dev |
 | `.env` | Tạo/sửa ở máy local | Điền cấu hình thực tế; không commit |
-| `.dockerignore` | Tạo | Loại .git, .env, bin/obj, TestResults và frontend/node_modules khỏi build context; giữ các file cần build |
+| `.dockerignore` | Tạo | Loại .git, .env, bin/obj, TestResults, node_modules, dist và playwright-output khỏi build context; giữ các file cần build |
 
 - [ ] Mount named volume `rabbitmq-data:/var/lib/rabbitmq` và khai báo volume ở cuối Compose.
 - [ ] Ghim phiên bản image/digest đã kiểm tra khi bàn giao.
