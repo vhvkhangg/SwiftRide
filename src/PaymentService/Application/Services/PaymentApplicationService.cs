@@ -4,6 +4,7 @@ using SwiftRide.PaymentService.Domain.Entities;
 using SwiftRide.PaymentService.Domain.Enums;
 using SwiftRide.PaymentService.Domain.Exceptions;
 using SwiftRide.PaymentService.Domain.Repositories;
+using SwiftRide.PaymentService.Application.Exceptions;
 
 namespace SwiftRide.PaymentService.Application.Services;
 
@@ -71,14 +72,30 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
         if (existing is not null)
         {
-            EnsureSamePayload(existing, request);
+            if (!HasSamePayload(existing, request))
+            {
+                throw new PaymentCommandRejectedException(
+                    "IdempotencyKey đã được sử dụng cho payload khác.");
+            }
+
+            if (existing.Status != PaymentStatus.Succeeded)
+            {
+                throw new PaymentCommandRejectedException(
+                    $"Payment với IdempotencyKey này đang ở " +
+                    $"trạng thái '{existing.Status}'.");
+            }
+
             return PaymentResponse.From(existing);
         }
 
-        await EnsureTripNotSettledAsync(
-            request.TripId,
-            cancellationToken
-        );
+        var settled = await _payments.GetSettledByTripIdAsync(request.TripId, cancellationToken);
+
+        if (settled is not null)
+        {
+            throw new PaymentCommandRejectedException(
+                "Trip đã có Payment Succeeded hoặc Refunded. " +
+                "Không thể thanh toán bằng IdempotencyKey khác.");
+        }
 
         var payment = await StoreNewPaymentAsync(
             request,
@@ -218,7 +235,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 
             return winner;
         }
-        catch (TripAlreadyPaidException ex) when(recoverUniqueViolation)
+        catch (TripAlreadyPaidException ex) when (recoverUniqueViolation)
         {
             throw new InvalidOperationException(
                 "Trip vừa được thanh toán bởi request khác.",
@@ -243,25 +260,31 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
         }
     }
 
-    private static void EnsureSamePayload(
+    private static bool HasSamePayload(
         Payment payment,
         CreatePaymentRequest request
     )
     {
-        if (payment.TripId != request.TripId ||
-            payment.Amount != request.Amount ||
-            !string.Equals(
-                payment.PayerAccount,
-                request.PayerAccount,
-                StringComparison.Ordinal) ||
-            !string.Equals(
-                payment.PayeeAccount,
-                request.PayeeAccount,
-                StringComparison.Ordinal)
-        )
+        return payment.TripId == request.TripId &&
+        payment.Amount == request.Amount &&
+        string.Equals(
+            payment.PayerAccount,
+            request.PayerAccount,
+            StringComparison.Ordinal) &&
+        string.Equals(
+            payment.PayeeAccount,
+            request.PayeeAccount,
+            StringComparison.Ordinal);
+    }
+
+    private static void EnsureSamePayload(
+        Payment payment,
+        CreatePaymentRequest request)
+    {
+        if (!HasSamePayload(payment, request))
         {
             throw new InvalidOperationException(
-                "IdempotencyKey đã được sử dụng cho payload khác.");
+            "IdempotencyKey đã được sử dụng cho payload khác.");
         }
     }
 
