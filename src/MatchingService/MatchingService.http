@@ -27,8 +27,6 @@ Content-Type: application/json
 ### Gán token của Driver vào biến
 @driverToken = 
 
---- DƯỚI ĐÂY LÀ PHẦN TEST MODULE CỦA BẠN ---
-
 ### Health Check (Không cần Auth)
 GET {{baseUrl}}/health
 
