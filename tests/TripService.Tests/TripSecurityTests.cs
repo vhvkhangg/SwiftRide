@@ -47,7 +47,7 @@ public sealed class TripSecurityTests
             {
                 received = request;
                 return new TripResponse(Guid.NewGuid(), request.RiderId, null, request.PickupAddress,
-                    request.DropoffAddress, request.FareEstimate, TripStatus.Requested, DateTime.UtcNow, null);
+                    request.DropoffAddress, 100, TripStatus.Requested, DateTime.UtcNow, null);
             });
         trips.Setup(service => service.MarkPaidAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -59,7 +59,7 @@ public sealed class TripSecurityTests
         await app.StartAsync(TestContext.Current.CancellationToken);
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         var riderId = Guid.NewGuid();
-        var body = new CreateTripRequest(Guid.NewGuid(), "A", "B", 100, 10.77, 106.69);
+        var body = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.77, 106.69, 2, 10);
 
         async Task Check(string path, string? token, HttpStatusCode expected, bool create = false)
         {

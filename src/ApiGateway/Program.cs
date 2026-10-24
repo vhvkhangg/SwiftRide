@@ -35,6 +35,17 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
     {
         options.MapInboundClaims = false;
         options.TokenValidationParameters = tokens.ValidationParameters;
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    context.Request.Path.StartsWithSegments("/api/hubs/trips"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddAuthorization(options =>
 {
@@ -80,6 +91,7 @@ if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("Aut
 }
 if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("DevelopmentAccounts:Enabled"))
     await DevelopmentAccounts.SeedAsync(app.Services, builder.Configuration);
+app.UseWebSockets();
 await app.UseOcelot();
 await app.RunAsync();
 

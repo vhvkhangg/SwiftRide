@@ -7,9 +7,11 @@ public sealed class RequestedState : TripState
 {
     public override TripStatus Status => TripStatus.Requested;
 
+    public override TripState ConfirmPrice() => new PriceConfirmedState();
+
     public override TripState AcceptByDriver(Guid driverId)
     {
-        return new DriverAcceptedState();
+        throw new InvalidOperationException("Rider chưa xác nhận giá.");
     }
 
     public override TripState Cancel()

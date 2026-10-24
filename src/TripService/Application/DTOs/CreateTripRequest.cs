@@ -6,7 +6,11 @@ public sealed record CreateTripRequest(
     Guid RiderId,
     string PickupAddress,
     string DropoffAddress,
-    decimal? FareEstimate,
-    double? PickupLatitude = null,
-    double? PickupLongitude = null
+    double? PickupLatitude,
+    double? PickupLongitude,
+    decimal Distance,
+    decimal EstimatedTime,
+    string? RideType = null,
+    decimal Surge = 1m,
+    string? PromoCode = null
 );

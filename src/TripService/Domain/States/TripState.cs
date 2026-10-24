@@ -8,6 +8,8 @@ public abstract class TripState
     public abstract TripStatus Status { get; }
 
     // Các hành động có thể xảy ra trong hệ thống
+    public virtual TripState ConfirmPrice() =>
+        throw new InvalidOperationException("Không thể xác nhận giá ở trạng thái hiện tại.");
     public abstract TripState AcceptByDriver(Guid driverId);
     public abstract TripState StartEnRoute();
     public abstract TripState Pickup();

@@ -60,6 +60,45 @@ public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRep
             .ToArray();
     }
 
+    public async Task<(DriverLocation Driver, double DistanceKm)?> FindNearestAvailableAsync(
+        double latitude,
+        double longitude,
+        double radiusKm,
+        IReadOnlyCollection<string> excludedDriverIds,
+        CancellationToken cancellationToken)
+    {
+        var point = GeoJson.Point(GeoJson.Geographic(longitude, latitude));
+        var filters = new List<FilterDefinition<DriverLocation>>
+        {
+            Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
+            Builders<DriverLocation>.Filter.NearSphere(driver => driver.Location, point, radiusKm * 1000)
+        };
+
+        if (excludedDriverIds.Count > 0)
+            filters.Add(Builders<DriverLocation>.Filter.Nin(driver => driver.DriverId, excludedDriverIds));
+
+        var driver = await collection.Find(Builders<DriverLocation>.Filter.And(filters))
+            .FirstOrDefaultAsync(cancellationToken);
+        if (driver is null) return null;
+
+        var coordinates = driver.Location.Coordinates;
+        return (driver, Haversine(latitude, longitude, coordinates.Latitude, coordinates.Longitude));
+    }
+
+    public async Task SetAvailabilityAsync(
+        string driverId,
+        bool isAvailable,
+        CancellationToken cancellationToken)
+    {
+        var filter = Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId);
+        var update = Builders<DriverLocation>.Update
+            .Set(driver => driver.IsAvailable, isAvailable)
+            .Set(driver => driver.UpdatedAt, DateTime.UtcNow);
+        var result = await collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+        if (result.MatchedCount == 0)
+            throw new KeyNotFoundException($"Không tìm thấy vị trí tài xế '{driverId}'.");
+    }
+
     private static double Haversine(double lat1, double lon1, double lat2, double lon2)
     {
         const double earthRadiusKm = 6371;

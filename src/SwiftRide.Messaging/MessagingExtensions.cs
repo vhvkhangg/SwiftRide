@@ -108,6 +108,7 @@ public static class MessagingExtensions
         });
 
         services.AddScoped<MessagePublisher>();
+        services.AddScoped<ITripMessageBus>(provider => provider.GetRequiredService<MessagePublisher>());
 
         return services;
     }

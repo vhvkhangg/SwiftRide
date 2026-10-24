@@ -26,6 +26,14 @@ public static class ServiceSecurity
                 options.TokenValidationParameters = Parameters(key, issuer, audience);
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(accessToken) &&
+                            context.Request.Path.StartsWithSegments("/hubs/trips"))
+                            context.Token = accessToken;
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = context =>
                     {
                         if (!Guid.TryParse(context.Principal?.FindFirstValue("sub"), out var userId) || userId == Guid.Empty)
@@ -45,6 +53,8 @@ public static class ServiceSecurity
                 .RequireClaim("sub").Build();
             options.AddPolicy("InternalRead", policy => policy.AddAuthenticationSchemes("Service")
                 .RequireAuthenticatedUser().RequireClaim("sub", "payment-service", "matching-service"));
+            options.AddPolicy("InternalPricing", policy => policy.AddAuthenticationSchemes("Service")
+                .RequireAuthenticatedUser().RequireClaim("sub", "trip-service"));
             options.AddPolicy("Payments", policy => policy.AddAuthenticationSchemes("Service")
                 .RequireAuthenticatedUser().RequireClaim("sub", "payment-service"));
             options.AddPolicy("Matching", policy => policy.AddAuthenticationSchemes("Service")

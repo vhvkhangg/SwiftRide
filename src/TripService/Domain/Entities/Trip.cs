@@ -12,8 +12,12 @@ public sealed class Trip
     public Guid? DriverId { get; private set; }
     public string PickupAddress { get; private set; } = string.Empty;
     public string DropoffAddress { get; private set; } = string.Empty;
+    public double? PickupLatitude { get; private set; }
+    public double? PickupLongitude { get; private set; }
     public decimal? FareEstimate { get; private set; }
     public TripStatus Status { get; private set; }
+    public int MatchingAttempt { get; private set; }
+    public string? PaymentFailureReason { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime? UpdatedAt { get; private set; }
 
@@ -23,7 +27,13 @@ public sealed class Trip
 
     private Trip() { }
 
-    public static Trip Create(Guid riderId, string pickup, string dropoff, decimal? fare)
+    public static Trip Create(
+        Guid riderId,
+        string pickup,
+        string dropoff,
+        decimal? fare,
+        double? pickupLatitude = null,
+        double? pickupLongitude = null)
     {
         var trip = new Trip
         {
@@ -31,6 +41,8 @@ public sealed class Trip
             RiderId = riderId,
             PickupAddress = pickup,
             DropoffAddress = dropoff,
+            PickupLatitude = pickupLatitude,
+            PickupLongitude = pickupLongitude,
             FareEstimate = fare,
             CreatedAt = DateTime.UtcNow,
             Status = TripStatus.Requested
@@ -48,6 +60,7 @@ public sealed class Trip
         _state = Status switch
         {
             TripStatus.Requested => new RequestedState(),
+            TripStatus.PriceConfirmed => new PriceConfirmedState(),
             TripStatus.DriverAccepted => new DriverAcceptedState(),
             TripStatus.EnRoute => new EnRouteState(),
             TripStatus.PickedUp => new PickedUpState(),
@@ -61,6 +74,27 @@ public sealed class Trip
     }
 
     // --- Các hàm Uỷ thác (Delegate) chuyển việc cho _state ---
+
+    public void ConfirmPrice()
+    {
+        if (Status == TripStatus.PriceConfirmed) return;
+
+        _state = _state.ConfirmPrice();
+        Status = _state.Status;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public int BeginMatchingAttempt(int maxAttempts)
+    {
+        if (Status != TripStatus.PriceConfirmed)
+            throw new InvalidOperationException("Trip chưa xác nhận giá.");
+        if (MatchingAttempt >= maxAttempts)
+            throw new InvalidOperationException("Trip đã hết số lượt tìm tài xế.");
+
+        MatchingAttempt++;
+        UpdatedAt = DateTime.UtcNow;
+        return MatchingAttempt;
+    }
 
     public void AcceptByDriver(Guid driverId)
     {
@@ -118,6 +152,14 @@ public sealed class Trip
     {
         _state = _state.MarkFailed();
         Status = _state.Status;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void RecordPaymentFailure(string reason)
+    {
+        if (Status != TripStatus.PaymentPending)
+            throw new InvalidOperationException("Chuyến không ở trạng thái chờ thanh toán.");
+        PaymentFailureReason = reason;
         UpdatedAt = DateTime.UtcNow;
     }
 }
