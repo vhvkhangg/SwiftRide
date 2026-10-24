@@ -28,19 +28,63 @@ public static class TripEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-            catch (TripPublishException ex)
+            catch (HttpRequestException ex)
             {
-                logger.LogError(ex, "Gửi TripRequestedV1 lỗi cho chuyến {TripId}", ex.TripId);
-                return Results.Json(new { tripId = ex.TripId, error = ex.Message }, statusCode: 503);
+                logger.LogError(ex, "Không lấy được báo giá từ Matching/Pricing.");
+                return Results.Json(new { error = "Không thể lấy báo giá lúc này." }, statusCode: 503);
             }
         }).RequireAuthorization(p => p.RequireRole("Rider"));
 
         // API Lấy thông tin chuyến đi
         group.MapGet("/{id:guid}", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
             Results.Ok(await service.GetByIdAsync(id, ct)));
+        group.MapPost("/{id:guid}/confirm-price", async (
+            Guid id, ITripApplicationService service, CancellationToken ct) =>
+        {
+            await service.ConfirmPriceAsync(id, ct);
+            return Results.NoContent();
+        }).RequireAuthorization(p => p.RequireRole("Rider"));
+
+        group.MapGet("/driver/invitations", async (
+            HttpContext context, TripDbContext db, CancellationToken ct) =>
+        {
+            var driverId = context.User.UserId();
+            var now = DateTime.UtcNow;
+            var invitations = await (
+                from invitation in db.DriverInvitations.AsNoTracking()
+                join trip in db.Trips.AsNoTracking() on invitation.TripId equals trip.Id
+                where invitation.DriverId == driverId &&
+                    invitation.ExpiresAtUtc > now &&
+                    trip.Status == TripStatus.PriceConfirmed
+                select new
+                {
+                    trip.Id,
+                    invitation.ExpiresAtUtc,
+                    trip.PickupAddress,
+                    trip.DropoffAddress,
+                    trip.FareEstimate
+                })
+                .ToListAsync(ct);
+
+            return Results.Ok(invitations);
+        }).RequireAuthorization(p => p.RequireRole("Driver"));
+
         group.MapPost("/{id:guid}/driver-accept", async (Guid id, HttpContext context, ITripApplicationService service, CancellationToken ct) =>
         {
             await service.DriverAcceptAsync(id, new DriverAcceptRequest(context.User.UserId()), ct);
+            return Results.NoContent();
+        }).RequireAuthorization(p => p.RequireRole("Driver"));
+        group.MapPost("/{id:guid}/driver-reject", async (
+            Guid id, HttpContext context, TripDbContext db, CancellationToken ct) =>
+        {
+            var driverId = context.User.UserId();
+            var invitation = await db.DriverInvitations.SingleOrDefaultAsync(
+                item => item.TripId == id && item.DriverId == driverId, ct);
+            if (invitation is null || invitation.ExpiresAtUtc <= DateTime.UtcNow)
+                return Results.Conflict(new { error = "Lời mời không còn hiệu lực." });
+
+            invitation.ExpiresAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(p => p.RequireRole("Driver"));
         group.MapPost("/{id:guid}/enroute", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
@@ -63,7 +107,9 @@ public static class TripEndpoints
         app.MapGet("/internal/trips/{id:guid}", async (Guid id, TripDbContext db, CancellationToken ct) =>
         {
             var trip = await db.Trips.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
-            return trip is null ? Results.NotFound() : Results.Ok(trip);
+            return trip is null
+                ? Results.NotFound()
+                : Results.Ok(new { trip.Id, trip.RiderId, Status = trip.Status.ToString() });
         }).RequireAuthorization("InternalRead");
         app.MapPost("/internal/trips/{id:guid}/pay", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
         { await service.MarkPaidAsync(id, ct); return Results.NoContent(); }).RequireAuthorization("Payments");
@@ -72,7 +118,7 @@ public static class TripEndpoints
             if (request.DriverId == Guid.Empty) return Results.BadRequest();
             var trip = await db.Trips.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (trip is null) return Results.NotFound();
-            if (trip.Status != TripStatus.Requested || trip.DriverId is not null) return Results.Conflict();
+            if (trip.Status != TripStatus.PriceConfirmed || trip.DriverId is not null) return Results.Conflict();
             var invite = await db.DriverInvitations.SingleOrDefaultAsync(x => x.TripId == id && x.DriverId == request.DriverId, ct);
             if (invite is null)
                 db.DriverInvitations.Add(new() { TripId = id, DriverId = request.DriverId, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(2) });
@@ -97,9 +143,11 @@ public sealed class TripAccessFilter(TripDbContext db) : IEndpointFilter
             {
                 var trip = await db.Trips.SingleOrDefaultAsync(x => x.Id == id, http.RequestAborted);
                 if (trip is null) return Results.NotFound();
-                if (http.Request.Path.Value!.EndsWith("/driver-accept", StringComparison.OrdinalIgnoreCase))
+                var path = http.Request.Path.Value!;
+                if (path.EndsWith("/driver-accept", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith("/driver-reject", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (trip.Status != TripStatus.Requested || trip.DriverId is not null) return Results.Conflict();
+                    if (trip.Status != TripStatus.PriceConfirmed || trip.DriverId is not null) return Results.Conflict();
                     if (!await db.DriverInvitations.AnyAsync(x => x.TripId == id && x.DriverId == userId &&
                         x.ExpiresAtUtc > DateTime.UtcNow, http.RequestAborted)) return Results.Forbid();
                 }

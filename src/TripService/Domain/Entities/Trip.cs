@@ -48,6 +48,7 @@ public sealed class Trip
         _state = Status switch
         {
             TripStatus.Requested => new RequestedState(),
+            TripStatus.PriceConfirmed => new PriceConfirmedState(),
             TripStatus.DriverAccepted => new DriverAcceptedState(),
             TripStatus.EnRoute => new EnRouteState(),
             TripStatus.PickedUp => new PickedUpState(),
@@ -61,6 +62,15 @@ public sealed class Trip
     }
 
     // --- Các hàm Uỷ thác (Delegate) chuyển việc cho _state ---
+
+    public void ConfirmPrice()
+    {
+        if (Status == TripStatus.PriceConfirmed) return;
+
+        _state = _state.ConfirmPrice();
+        Status = _state.Status;
+        UpdatedAt = DateTime.UtcNow;
+    }
 
     public void AcceptByDriver(Guid driverId)
     {

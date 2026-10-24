@@ -1,8 +1,6 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using SwiftRide.Contracts.Trips;
-using SwiftRide.Messaging;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Domain.Entities;
@@ -15,13 +13,16 @@ public sealed class TripApplicationService : ITripApplicationService
 {
     private readonly ITripWriter _writer;
     private readonly ITripReader _reader;
-    private readonly MessagePublisher _publisher;
+    private readonly IMatchingPricingClient _matchingPricing;
 
-    public TripApplicationService(ITripWriter writer, ITripReader reader, MessagePublisher publisher)
+    public TripApplicationService(
+        ITripWriter writer,
+        ITripReader reader,
+        IMatchingPricingClient matchingPricing)
     {
         _writer = writer;
         _reader = reader;
-        _publisher = publisher;
+        _matchingPricing = matchingPricing;
     }
 
     public async Task<TripResponse> CreateAsync(CreateTripRequest request, CancellationToken ct = default)
@@ -34,6 +35,11 @@ public sealed class TripApplicationService : ITripApplicationService
             throw new ArgumentException("Cần RiderId và hai địa chỉ hợp lệ, tối đa 500 ký tự.");
         }
 
+        if (request.Distance < 0 || request.EstimatedTime < 0 || request.Surge <= 0)
+        {
+            throw new ArgumentException("Quãng đường và thời gian không được âm; hệ số surge phải lớn hơn 0.");
+        }
+
         if (!request.PickupLatitude.HasValue || !request.PickupLongitude.HasValue ||
             !double.IsFinite(request.PickupLatitude.Value) ||
             !double.IsFinite(request.PickupLongitude.Value) ||
@@ -43,54 +49,29 @@ public sealed class TripApplicationService : ITripApplicationService
             throw new ArgumentException("Cần PickupLatitude từ -90 đến 90 và PickupLongitude từ -180 đến 180.");
         }
 
+        var quote = await _matchingPricing.GetQuoteAsync(
+            new MatchingQuoteRequest(
+                request.Distance,
+                request.EstimatedTime,
+                request.RideType,
+                request.Surge,
+                request.PromoCode),
+            ct);
+
         var trip = Trip.Create(
             request.RiderId,
             request.PickupAddress,
             request.DropoffAddress,
-            request.FareEstimate);
+            quote.Total);
 
         await _writer.AddAsync(trip, ct);
 
-        var message = new TripRequestedV1
-        {
-            CorrelationId = trip.Id,
-            TripId = trip.Id,
-            RiderId = trip.RiderId,
-            PickupAddress = trip.PickupAddress,
-            DropoffAddress = trip.DropoffAddress,
-            PickupLatitude = request.PickupLatitude,
-            PickupLongitude = request.PickupLongitude,
-            OccurredAtUtc = new DateTimeOffset(trip.CreatedAt, TimeSpan.Zero)
-        };
-
-        try
-        {
-            await _publisher.PublishAsync(message, ct);
-        }
-        catch (Exception ex)
-        {
-            // Giữ ID chuyến đã lưu để client không tạo lại chuyến khi gửi message lỗi.
-            throw new TripPublishException(trip.Id, ex);
-        }
-
-        return new TripResponse(
-            trip.Id,
-            trip.RiderId,
-            trip.DriverId,
-            trip.PickupAddress,
-            trip.DropoffAddress,
-            trip.FareEstimate,
-            trip.Status,
-            trip.CreatedAt,
-            trip.UpdatedAt
-        );
+        return ToResponse(trip);
     }
 
-    // --- CÁC HÀM DƯỚI ĐÂY SẼ LÀM Ở CÁC BƯỚC TIẾP THEO ---
-
     public async Task<TripResponse> GetByIdAsync(
-    Guid tripId,
-    CancellationToken ct = default)
+        Guid tripId,
+        CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
 
@@ -100,23 +81,22 @@ public sealed class TripApplicationService : ITripApplicationService
                 $"Không tìm thấy chuyến đi '{tripId}'.");
         }
 
-        return new TripResponse(
-            trip.Id,
-            trip.RiderId,
-            trip.DriverId,
-            trip.PickupAddress,
-            trip.DropoffAddress,
-            trip.FareEstimate,
-            trip.Status,
-            trip.CreatedAt,
-            trip.UpdatedAt
-        );
+        return ToResponse(trip);
+    }
+
+    public async Task ConfirmPriceAsync(Guid tripId, CancellationToken ct = default)
+    {
+        var trip = await _reader.GetByIdAsync(tripId, ct);
+        if (trip is null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
+
+        trip.ConfirmPrice();
+        await _writer.SaveAsync(trip, ct);
     }
 
     public async Task DriverAcceptAsync(Guid tripId, DriverAcceptRequest request, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.AcceptByDriver(request.DriverId);
         await _writer.SaveAsync(trip, ct);
@@ -125,7 +105,7 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task StartEnRouteAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.StartEnRoute();
         await _writer.SaveAsync(trip, ct);
@@ -134,7 +114,7 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task PickupAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.Pickup();
         await _writer.SaveAsync(trip, ct);
@@ -142,7 +122,7 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task DropoffAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.Dropoff();
         trip.MarkPaymentPending();
@@ -152,7 +132,7 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task CancelAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.Cancel();
         await _writer.SaveAsync(trip, ct);
@@ -161,7 +141,7 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task MarkPaymentPendingAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.MarkPaymentPending();
         await _writer.SaveAsync(trip, ct);
@@ -170,7 +150,7 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task MarkPaidAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         // Bỏ qua nếu ĐÃ thanh toán xong từ trước
         if (trip.Status == TripStatus.Paid) return;
@@ -182,20 +162,23 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task MarkFailedAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await _reader.GetByIdAsync(tripId, ct);
-        if (trip == null) throw new Exception("Không tìm thấy chuyến đi.");
+        if (trip == null) throw new KeyNotFoundException($"Không tìm thấy chuyến đi '{tripId}'.");
 
         trip.MarkFailed();
         await _writer.SaveAsync(trip, ct);
     }
-}
 
-public sealed class TripPublishException : Exception
-{
-    public Guid TripId { get; }
-
-    public TripPublishException(Guid tripId, Exception innerException)
-        : base("Chuyến đã lưu nhưng chưa xác nhận được việc gửi message.", innerException)
+    private static TripResponse ToResponse(Trip trip)
     {
-        TripId = tripId;
+        return new TripResponse(
+            trip.Id,
+            trip.RiderId,
+            trip.DriverId,
+            trip.PickupAddress,
+            trip.DropoffAddress,
+            trip.FareEstimate,
+            trip.Status,
+            trip.CreatedAt,
+            trip.UpdatedAt);
     }
 }

@@ -12,6 +12,9 @@ public interface ITripApplicationService
     
     // Lấy thông tin chuyến đi
     Task<TripResponse> GetByIdAsync(Guid tripId, CancellationToken ct = default);
+
+    // Rider xác nhận báo giá
+    Task ConfirmPriceAsync(Guid tripId, CancellationToken ct = default);
     
     // Tài xế nhận chuyến
     Task DriverAcceptAsync(Guid tripId, DriverAcceptRequest request, CancellationToken ct = default);

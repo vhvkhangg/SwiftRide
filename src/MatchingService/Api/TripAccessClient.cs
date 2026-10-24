@@ -21,4 +21,4 @@ public sealed class TripAccessClient(HttpClient client)
         response.EnsureSuccessStatusCode();
     }
 }
-public sealed record MatchingTrip(Guid Id, Guid RiderId);
+public sealed record MatchingTrip(Guid Id, Guid RiderId, string Status);

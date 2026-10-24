@@ -4,6 +4,8 @@ using SwiftRide.Messaging;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.TripService.Api;
 using SwiftRide.TripService.Infrastructure;
+using SwiftRide.TripService.Infrastructure.Clients;
+using SwiftRide.TripService.Application.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,7 +16,14 @@ builder.Services.AddDbContext<TripDbContext>(options =>
 
 builder.Services.AddServiceSecurity(builder.Configuration);
 
-
+builder.Services.AddTransient<InternalTripHandler>();
+builder.Services.AddHttpClient<IMatchingPricingClient, MatchingPricingClient>(client =>
+{
+    var baseUrl = builder.Configuration["Services:MatchingService:BaseUrl"]
+        ?? throw new InvalidOperationException("Chưa cấu hình URL của MatchingService.");
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromSeconds(5);
+}).AddHttpMessageHandler<InternalTripHandler>();
 
 // --- Đăng ký Dependency Injection (DI) ---
 builder.Services.AddScoped<SwiftRide.TripService.Domain.Interfaces.ITripReader, SwiftRide.TripService.Infrastructure.Repositories.TripRepository>();

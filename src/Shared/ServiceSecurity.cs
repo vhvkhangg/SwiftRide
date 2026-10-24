@@ -45,6 +45,8 @@ public static class ServiceSecurity
                 .RequireClaim("sub").Build();
             options.AddPolicy("InternalRead", policy => policy.AddAuthenticationSchemes("Service")
                 .RequireAuthenticatedUser().RequireClaim("sub", "payment-service", "matching-service"));
+            options.AddPolicy("InternalPricing", policy => policy.AddAuthenticationSchemes("Service")
+                .RequireAuthenticatedUser().RequireClaim("sub", "trip-service"));
             options.AddPolicy("Payments", policy => policy.AddAuthenticationSchemes("Service")
                 .RequireAuthenticatedUser().RequireClaim("sub", "payment-service"));
             options.AddPolicy("Matching", policy => policy.AddAuthenticationSchemes("Service")

@@ -19,19 +19,35 @@ public static class MatchingEndpoints
         .WithTags("Định giá (Pricing)")
         .Produces<QuoteResponseDto>().RequireAuthorization(p => p.RequireRole("Rider"));
 
+        app.MapPost("/internal/quote", (QuoteRequestDto request, IPricingService service) =>
+        {
+            var result = service.Calculate(request.ToDomain());
+            return Results.Ok(new QuoteResponseDto(result.Base, result.Distance, result.Time, result.Surge,
+                result.Toll, result.Discount, result.Tax, result.Total));
+        })
+        .WithSummary("Tính báo giá cho Trip Service")
+        .WithTags("Định giá (Pricing)")
+        .Produces<QuoteResponseDto>().RequireAuthorization("InternalPricing");
+
         _ = app.MapPost("/match", async (MatchRequestDto request, IMatchingService service, TripAccessClient trips, HttpContext context, CancellationToken ct) =>
         {
             if (!Guid.TryParse(request.TripId, out var tripId)) return Results.BadRequest();
             var trip = await trips.GetAsync(tripId, ct);
             if (trip is null) return Results.NotFound();
             if (trip.RiderId != context.User.UserId()) return Results.Forbid();
+            if (!string.Equals(trip.Status, "PriceConfirmed", StringComparison.Ordinal))
+                return Results.Conflict();
+
             var result = await service.MatchAsync(request.ToDomain(), ct);
-            foreach (var driver in result.Drivers)
-                if (Guid.TryParse(driver.DriverId, out var driverId))
-                    await trips.InviteAsync(tripId, driverId, ct);
-            var response = new MatchResponseDto(result.TripId, [.. result.Drivers
-                .Select(driver => new MatchedDriverDto(driver.DriverId, driver.Latitude, driver.Longitude,
-                    driver.DistanceKm, driver.UpdatedAt))]);
+            var candidate = result.Drivers.FirstOrDefault();
+            if (candidate is not null && Guid.TryParse(candidate.DriverId, out var driverId))
+                await trips.InviteAsync(tripId, driverId, ct);
+
+            var response = new MatchResponseDto(result.TripId,
+                candidate is null
+                    ? []
+                    : [new MatchedDriverDto(candidate.DriverId, candidate.Latitude, candidate.Longitude,
+                        candidate.DistanceKm, candidate.UpdatedAt)]);
             return Results.Ok(response);
         })
         .WithSummary("Tìm các tài xế trống ở gần")
