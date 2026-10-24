@@ -45,14 +45,27 @@ public class TripRequestedConsumer : IConsumer<TripRequestedV1>
                 message.TripId, result.Drivers.Count);
         }
 
-        // TH1: Tìm thấy tài xế -> Chọn tài xế gần nhất và Publish DriverMatchedV1
+        // TH1: Tìm thấy tài xế và DriverId hợp lệ -> Publish DriverMatchedV1.
         if (result.Drivers.Count > 0)
         {
             var bestDriver = result.Drivers[0];
 
             if (!Guid.TryParse(bestDriver.DriverId, out var driverGuid))
             {
-                driverGuid = Guid.NewGuid();
+                const string reason = "Tài xế phù hợp có DriverId không đúng định dạng GUID.";
+
+                await context.Publish(new DriverMatchFailedV1
+                {
+                    CorrelationId = message.CorrelationId,
+                    TripId = message.TripId,
+                    Reason = reason,
+                    OccurredAtUtc = DateTimeOffset.UtcNow
+                }, context.CancellationToken);
+
+                _logger.LogWarning(
+                    "Tài xế {DriverId} cho Trip {TripId} có DriverId không hợp lệ, đã bắn DriverMatchFailedV1",
+                    bestDriver.DriverId, message.TripId);
+                return;
             }
 
             await context.Publish(new DriverMatchedV1
@@ -66,7 +79,7 @@ public class TripRequestedConsumer : IConsumer<TripRequestedV1>
             _logger.LogInformation("Đã bắn event DriverMatchedV1 cho Trip {TripId} với tài xế {DriverId}",
                 message.TripId, driverGuid);
         }
-        // TH2: Không có tài xế trong bán kính -> Publish DriverMatchFailedV1
+        // TH2: Không có tài xế trong bán kính -> Publish DriverMatchFailedV1.
         else
         {
             await context.Publish(new DriverMatchFailedV1

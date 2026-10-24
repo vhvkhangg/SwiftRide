@@ -9,10 +9,9 @@ public sealed record QuoteRequestDto
     [Range(0, double.MaxValue)] public decimal Distance { get; init; }
     [Range(0, double.MaxValue)] public decimal EstimatedTime { get; init; }
     public string? RideType { get; init; }
-    [Range(0.01, double.MaxValue)] public decimal Surge { get; init; } = 1m;
     public string? PromoCode { get; init; }
 
-    public QuoteRequest ToDomain() => new(Distance, EstimatedTime, RideType, Surge, PromoCode);
+    public QuoteRequest ToDomain() => new(Distance, EstimatedTime, RideType, PromoCode);
 }
 
 /// <summary>Detailed price breakdown returned for a ride quote.</summary>
@@ -45,7 +44,6 @@ public sealed record MatchResponseDto(string TripId, IReadOnlyList<MatchedDriver
 /// <summary>Payload used by a driver app to publish its GPS location.</summary>
 public sealed record DriverLocationRequestDto
 {
-    public string? DriverId { get; init; }
     [Range(-90, 90)] public double Latitude { get; init; }
     [Range(-180, 180)] public double Longitude { get; init; }
     public bool IsAvailable { get; init; }

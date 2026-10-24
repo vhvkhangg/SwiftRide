@@ -1,4 +1,5 @@
 using SwiftRide.Security;
+using System.Security.Claims;
 using MongoDB.Driver.GeoJsonObjectModel;
 using SwiftRide.MatchingService.Application.Interfaces;
 using SwiftRide.MatchingService.Domain.Interfaces;
@@ -9,9 +10,12 @@ public static class MatchingEndpoints
 {
     public static void MapMatchingEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/quote", (QuoteRequestDto request, IPricingService service) =>
+        app.MapPost("/quote", async (
+            QuoteRequestDto request,
+            IPricingService service,
+            CancellationToken ct) =>
         {
-            var result = service.Calculate(request.ToDomain());
+            var result = await service.CalculateAsync(request.ToDomain(), ct);
             return Results.Ok(new QuoteResponseDto(result.Base, result.Distance, result.Time, result.Surge,
                 result.Toll, result.Discount, result.Tax, result.Total));
         })
@@ -33,7 +37,14 @@ public static class MatchingEndpoints
         {
             if (!Guid.TryParse(request.TripId, out var tripId)) return Results.BadRequest();
             var trip = await trips.GetAsync(tripId, ct);
-            if (trip is null) return Results.NotFound();
+            if (trip is null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Không tìm thấy chuyến đi",
+                    detail: $"Chuyến đi với ID '{request.TripId}' không tồn tại hoặc đã bị xóa."
+                );
+            }
             if (trip.RiderId != context.User.UserId()) return Results.Forbid();
             if (!string.Equals(trip.Status, "PriceConfirmed", StringComparison.Ordinal))
                 return Results.Conflict();
@@ -58,10 +69,13 @@ public static class MatchingEndpoints
         app.MapPost("/api/drivers/location", async (
             DriverLocationRequestDto request, IDriverRepository repository, HttpContext context, CancellationToken ct) =>
         {
-            request = request with { DriverId = context.User.UserId().ToString() };
+            var driverId = context.User.UserId().ToString();
+            if (string.IsNullOrWhiteSpace(driverId))
+                return Results.Unauthorized();
+
             var point = GeoJson.Point(GeoJson.Geographic(request.Longitude, request.Latitude));
-            await repository.UpsertLocationAsync(request.DriverId, point, request.IsAvailable, ct);
-            return Results.Ok(new DriverLocationResponseDto(request.DriverId, request.IsAvailable, DateTimeOffset.UtcNow));
+            await repository.UpsertLocationAsync(driverId, point, request.IsAvailable, ct);
+            return Results.Ok(new DriverLocationResponseDto(driverId, request.IsAvailable, DateTimeOffset.UtcNow));
         })
         .WithSummary("Cập nhật vị trí GPS của tài xế")
         .WithTags("Tài xế (Drivers)")
