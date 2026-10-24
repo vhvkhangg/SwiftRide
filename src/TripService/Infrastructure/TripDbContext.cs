@@ -18,7 +18,8 @@ public sealed class TripDbContext(DbContextOptions<TripDbContext> options)
         modelBuilder.Entity<Trip>().Property<uint>("Version").IsRowVersion();
         var invitation = modelBuilder.Entity<DriverInvitation>();
         invitation.HasKey(x => new { x.TripId, x.DriverId });
-        invitation.HasOne<Trip>().WithMany().HasForeignKey(x => x.TripId).OnDelete(DeleteBehavior.Cascade);
+        invitation.HasIndex(x => new { x.TripId, x.Attempt });
+        invitation.HasOne(x => x.Trip).WithMany().HasForeignKey(x => x.TripId).OnDelete(DeleteBehavior.Cascade);
         base.OnModelCreating(modelBuilder);
     }
 }

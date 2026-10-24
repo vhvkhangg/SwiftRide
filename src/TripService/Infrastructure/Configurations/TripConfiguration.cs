@@ -25,6 +25,12 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
             .HasMaxLength(500)
             .IsRequired();
 
+        builder.Property(t => t.MatchingAttempt)
+            .HasDefaultValue(0);
+
+        builder.Property(t => t.PaymentFailureReason)
+            .HasMaxLength(1000);
+
         // Bỏ qua biến _state
         builder.Ignore("_state");
     }

@@ -30,10 +30,18 @@ namespace SwiftRide.TripService.Migrations
                     b.Property<Guid>("DriverId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Attempt")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("boolean");
+
                     b.HasKey("TripId", "DriverId");
+
+                    b.HasIndex("TripId", "Attempt");
 
                     b.ToTable("DriverInvitations");
                 });
@@ -58,10 +66,25 @@ namespace SwiftRide.TripService.Migrations
                     b.Property<decimal?>("FareEstimate")
                         .HasColumnType("numeric");
 
+                    b.Property<int>("MatchingAttempt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("PaymentFailureReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<string>("PickupAddress")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<double?>("PickupLatitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("PickupLongitude")
+                        .HasColumnType("double precision");
 
                     b.Property<Guid>("RiderId")
                         .HasColumnType("uuid");
@@ -87,11 +110,13 @@ namespace SwiftRide.TripService.Migrations
 
             modelBuilder.Entity("SwiftRide.TripService.Domain.Entities.DriverInvitation", b =>
                 {
-                    b.HasOne("SwiftRide.TripService.Domain.Entities.Trip", null)
+                    b.HasOne("SwiftRide.TripService.Domain.Entities.Trip", "Trip")
                         .WithMany()
                         .HasForeignKey("TripId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Trip");
                 });
 #pragma warning restore 612, 618
         }

@@ -13,6 +13,9 @@ public static class MessagingTopology
         bus.Message<TripRequestedV1>(x => x.SetEntityName("swiftride-trip-requested-v1"));
         bus.Message<DriverMatchedV1>(x => x.SetEntityName("swiftride-driver-matched-v1"));
         bus.Message<DriverMatchFailedV1>(x => x.SetEntityName("swiftride-driver-match-failed-v1"));
+        bus.Message<FindDriverForTripV1>(x => x.SetEntityName("swiftride-find-driver-for-trip-v1"));
+        bus.Message<DriverFoundForTripV1>(x => x.SetEntityName("swiftride-driver-found-for-trip-v1"));
+        bus.Message<NoDriverFoundForTripV1>(x => x.SetEntityName("swiftride-no-driver-found-for-trip-v1"));
         bus.Message<ProcessPaymentV1>(x => x.SetEntityName("swiftride-process-payment-v1"));
         bus.Message<PaymentSucceededV1>(x => x.SetEntityName("swiftride-payment-succeeded-v1"));
         bus.Message<PaymentFailedV1>(x => x.SetEntityName("swiftride-payment-failed-v1"));
@@ -24,12 +27,18 @@ public static class MessagingTopology
         // Tạo queue/binding nhưng không lấy message ra khỏi queue.
         bus.ReceiveEndpoint(MessagingEndpoints.MatchingTripRequested,
             endpoint => endpoint.Bind<TripRequestedV1>());
+        bus.ReceiveEndpoint(MessagingEndpoints.MatchingFindDriverForTrip,
+            endpoint => endpoint.ConfigureConsumeTopology = false);
 
         bus.ReceiveEndpoint(MessagingEndpoints.TripDriverMatched,
             endpoint => endpoint.Bind<DriverMatchedV1>());
 
         bus.ReceiveEndpoint(MessagingEndpoints.TripDriverMatchFailed,
             endpoint => endpoint.Bind<DriverMatchFailedV1>());
+        bus.ReceiveEndpoint(MessagingEndpoints.TripDriverFoundForTrip,
+            endpoint => endpoint.Bind<DriverFoundForTripV1>());
+        bus.ReceiveEndpoint(MessagingEndpoints.TripNoDriverFoundForTrip,
+            endpoint => endpoint.Bind<NoDriverFoundForTripV1>());
 
         bus.ReceiveEndpoint(MessagingEndpoints.PaymentProcessPayment, endpoint =>
         {

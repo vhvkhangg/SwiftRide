@@ -4,8 +4,11 @@ namespace SwiftRide.Messaging;
 public static class MessagingEndpoints
 {
     public const string MatchingTripRequested = "swiftride-matching-trip-requested";
+    public const string MatchingFindDriverForTrip = "swiftride-matching-find-driver-for-trip";
     public const string TripDriverMatched = "swiftride-trip-driver-matched";
     public const string TripDriverMatchFailed = "swiftride-trip-driver-match-failed";
+    public const string TripDriverFoundForTrip = "swiftride-trip-driver-found-for-trip";
+    public const string TripNoDriverFoundForTrip = "swiftride-trip-no-driver-found-for-trip";
     public const string PaymentProcessPayment = "swiftride-payment-process-payment";
     public const string TripPaymentSucceeded = "swiftride-trip-payment-succeeded";
     public const string TripPaymentFailed = "swiftride-trip-payment-failed";

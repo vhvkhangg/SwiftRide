@@ -40,8 +40,6 @@ public static class MatchingEndpoints
 
             var result = await service.MatchAsync(request.ToDomain(), ct);
             var candidate = result.Drivers.FirstOrDefault();
-            if (candidate is not null && Guid.TryParse(candidate.DriverId, out var driverId))
-                await trips.InviteAsync(tripId, driverId, ct);
 
             var response = new MatchResponseDto(result.TripId,
                 candidate is null

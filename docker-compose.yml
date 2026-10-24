@@ -199,6 +199,19 @@ services:
       Routes__6__DownstreamHostAndPorts__0__Port: 8080
       Routes__7__DownstreamHostAndPorts__0__Host: matching-service
       Routes__7__DownstreamHostAndPorts__0__Port: 8080
+      Routes__8__UpstreamPathTemplate: /api/hubs/trips
+      Routes__8__UpstreamHttpMethod__0: GET
+      Routes__8__DownstreamPathTemplate: /hubs/trips
+      Routes__8__DownstreamScheme: http
+      Routes__8__DownstreamHostAndPorts__0__Host: trip-service
+      Routes__8__DownstreamHostAndPorts__0__Port: 8080
+      Routes__9__UpstreamPathTemplate: /api/hubs/trips/{everything}
+      Routes__9__UpstreamHttpMethod__0: GET
+      Routes__9__UpstreamHttpMethod__1: POST
+      Routes__9__DownstreamPathTemplate: /hubs/trips/{everything}
+      Routes__9__DownstreamScheme: http
+      Routes__9__DownstreamHostAndPorts__0__Host: trip-service
+      Routes__9__DownstreamHostAndPorts__0__Port: 8080
     depends_on:
       auth-postgres:
         condition: service_healthy

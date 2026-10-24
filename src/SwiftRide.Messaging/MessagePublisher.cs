@@ -1,9 +1,10 @@
 using MassTransit;
+using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Payments;
 
 namespace SwiftRide.Messaging;
 
-public class MessagePublisher
+public class MessagePublisher : ITripMessageBus
 {
     private readonly IPublishEndpoint _publisher;
     private readonly ISendEndpointProvider _sender;
@@ -35,4 +36,14 @@ public class MessagePublisher
         var endpoint = await _sender.GetSendEndpoint(address);
         await endpoint.Send(message, cancellationToken);
     }
+
+    public async Task SendFindDriverAsync(
+        FindDriverForTripV1 message,
+        CancellationToken cancellationToken = default)
+    {
+        var address = new Uri("queue:" + MessagingEndpoints.MatchingFindDriverForTrip);
+        var endpoint = await _sender.GetSendEndpoint(address);
+        await endpoint.Send(message, cancellationToken);
+    }
+
 }

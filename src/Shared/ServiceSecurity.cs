@@ -26,6 +26,14 @@ public static class ServiceSecurity
                 options.TokenValidationParameters = Parameters(key, issuer, audience);
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(accessToken) &&
+                            context.Request.Path.StartsWithSegments("/hubs/trips"))
+                            context.Token = accessToken;
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = context =>
                     {
                         if (!Guid.TryParse(context.Principal?.FindFirstValue("sub"), out var userId) || userId == Guid.Empty)

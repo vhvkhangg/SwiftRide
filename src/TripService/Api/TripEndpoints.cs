@@ -39,10 +39,18 @@ public static class TripEndpoints
         group.MapGet("/{id:guid}", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
             Results.Ok(await service.GetByIdAsync(id, ct)));
         group.MapPost("/{id:guid}/confirm-price", async (
-            Guid id, ITripApplicationService service, CancellationToken ct) =>
+            Guid id, ITripApplicationService service, ILogger<TripApplicationService> logger, CancellationToken ct) =>
         {
-            await service.ConfirmPriceAsync(id, ct);
-            return Results.NoContent();
+            try
+            {
+                await service.ConfirmPriceAsync(id, ct);
+                return Results.Accepted();
+            }
+            catch (TripMessagePublishException ex)
+            {
+                logger.LogError(ex, "Không gửi được yêu cầu Matching cho Trip {TripId}", ex.TripId);
+                return Results.Json(new { tripId = ex.TripId, error = ex.Message }, statusCode: 503);
+            }
         }).RequireAuthorization(p => p.RequireRole("Rider"));
 
         group.MapGet("/driver/invitations", async (
@@ -54,6 +62,7 @@ public static class TripEndpoints
                 from invitation in db.DriverInvitations.AsNoTracking()
                 join trip in db.Trips.AsNoTracking() on invitation.TripId equals trip.Id
                 where invitation.DriverId == driverId &&
+                    !invitation.IsResolved &&
                     invitation.ExpiresAtUtc > now &&
                     trip.Status == TripStatus.PriceConfirmed
                 select new
@@ -75,24 +84,44 @@ public static class TripEndpoints
             return Results.NoContent();
         }).RequireAuthorization(p => p.RequireRole("Driver"));
         group.MapPost("/{id:guid}/driver-reject", async (
-            Guid id, HttpContext context, TripDbContext db, CancellationToken ct) =>
+            Guid id,
+            HttpContext context,
+            ITripApplicationService service,
+            ILogger<TripApplicationService> logger,
+            CancellationToken ct) =>
         {
-            var driverId = context.User.UserId();
-            var invitation = await db.DriverInvitations.SingleOrDefaultAsync(
-                item => item.TripId == id && item.DriverId == driverId, ct);
-            if (invitation is null || invitation.ExpiresAtUtc <= DateTime.UtcNow)
-                return Results.Conflict(new { error = "Lời mời không còn hiệu lực." });
-
-            invitation.ExpiresAtUtc = DateTime.UtcNow;
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
+            try
+            {
+                await service.DriverRejectAsync(id, context.User.UserId(), ct);
+                return Results.Accepted();
+            }
+            catch (TripMessagePublishException ex)
+            {
+                logger.LogError(ex, "Không gửi được yêu cầu Matching tiếp theo cho Trip {TripId}", ex.TripId);
+                return Results.Json(new { tripId = ex.TripId, error = ex.Message }, statusCode: 503);
+            }
         }).RequireAuthorization(p => p.RequireRole("Driver"));
         group.MapPost("/{id:guid}/enroute", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
         { await service.StartEnRouteAsync(id, ct); return Results.NoContent(); }).RequireAuthorization(p => p.RequireRole("Driver"));
         group.MapPost("/{id:guid}/pickup", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
         { await service.PickupAsync(id, ct); return Results.NoContent(); }).RequireAuthorization(p => p.RequireRole("Driver"));
-        group.MapPost("/{id:guid}/dropoff", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
-        { await service.DropoffAsync(id, ct); return Results.NoContent(); }).RequireAuthorization(p => p.RequireRole("Driver"));
+        group.MapPost("/{id:guid}/dropoff", async (
+            Guid id,
+            ITripApplicationService service,
+            ILogger<TripApplicationService> logger,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await service.DropoffAsync(id, ct);
+                return Results.Accepted();
+            }
+            catch (TripMessagePublishException ex)
+            {
+                logger.LogError(ex, "Không gửi được yêu cầu thanh toán cho Trip {TripId}", ex.TripId);
+                return Results.Json(new { tripId = ex.TripId, error = ex.Message }, statusCode: 503);
+            }
+        }).RequireAuthorization(p => p.RequireRole("Driver"));
         group.MapPost("/{id:guid}/cancel", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
         { await service.CancelAsync(id, ct); return Results.NoContent(); }).RequireAuthorization(p => p.RequireRole("Rider"));
 
@@ -121,7 +150,7 @@ public static class TripEndpoints
             if (trip.Status != TripStatus.PriceConfirmed || trip.DriverId is not null) return Results.Conflict();
             var invite = await db.DriverInvitations.SingleOrDefaultAsync(x => x.TripId == id && x.DriverId == request.DriverId, ct);
             if (invite is null)
-                db.DriverInvitations.Add(new() { TripId = id, DriverId = request.DriverId, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(2) });
+                db.DriverInvitations.Add(new() { TripId = id, DriverId = request.DriverId, Attempt = trip.MatchingAttempt, ExpiresAtUtc = DateTime.UtcNow.AddMinutes(2) });
             else invite.ExpiresAtUtc = DateTime.UtcNow.AddMinutes(2);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
@@ -148,7 +177,7 @@ public sealed class TripAccessFilter(TripDbContext db) : IEndpointFilter
                     path.EndsWith("/driver-reject", StringComparison.OrdinalIgnoreCase))
                 {
                     if (trip.Status != TripStatus.PriceConfirmed || trip.DriverId is not null) return Results.Conflict();
-                    if (!await db.DriverInvitations.AnyAsync(x => x.TripId == id && x.DriverId == userId &&
+                    if (!await db.DriverInvitations.AnyAsync(x => x.TripId == id && x.DriverId == userId && !x.IsResolved &&
                         x.ExpiresAtUtc > DateTime.UtcNow, http.RequestAborted)) return Results.Forbid();
                 }
                 else if (!(http.User.IsInRole("Rider") && trip.RiderId == userId) &&

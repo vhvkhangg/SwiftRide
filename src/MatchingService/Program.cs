@@ -18,6 +18,12 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "matching", consum
     // Gắn đúng queue đã được Messaging.Setup tạo; retry chung vẫn áp dụng.
     consumers.AddConsumer<TripRequestedConsumer>()
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.MatchingTripRequested);
+    consumers.AddConsumer<FindDriverForTripConsumer>()
+        .Endpoint(endpoint =>
+        {
+            endpoint.Name = MessagingEndpoints.MatchingFindDriverForTrip;
+            endpoint.ConfigureConsumeTopology = false;
+        });
 });
 
 var mongoConnectionString = builder.Configuration.GetConnectionString("MatchDb")
