@@ -1,3 +1,4 @@
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.TripService.Domain.Entities;
 using SwiftRide.TripService.Infrastructure.Configurations;
@@ -15,6 +16,9 @@ public sealed class TripDbContext(DbContextOptions<TripDbContext> options)
     {
         // Áp dụng file cấu hình TripConfiguration
         modelBuilder.ApplyConfiguration(new TripConfiguration());
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
+        modelBuilder.AddOutboxStateEntity();
         modelBuilder.Entity<Trip>().Property<uint>("Version").IsRowVersion();
         var invitation = modelBuilder.Entity<DriverInvitation>();
         invitation.HasKey(x => new { x.TripId, x.DriverId });

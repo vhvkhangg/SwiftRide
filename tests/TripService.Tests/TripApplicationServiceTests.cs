@@ -5,6 +5,7 @@ using SwiftRide.TripService.Application.Services;
 using SwiftRide.TripService.Domain.Entities;
 using SwiftRide.TripService.Domain.Enums;
 using SwiftRide.TripService.Domain.Interfaces;
+using SwiftRide.Messaging;
 using Xunit;
 
 namespace SwiftRide.TripService.Tests;
@@ -14,9 +15,20 @@ public sealed class TripApplicationServiceTests
     private readonly Mock<ITripWriter> _writer = new();
     private readonly Mock<ITripReader> _reader = new();
     private readonly Mock<IMatchingPricingClient> _pricing = new();
+    private readonly Mock<ITripWorkflowRepository> _workflow = new();
+    private readonly Mock<ITripNotifier> _notifier = new();
+    private readonly Mock<ITripMessageBus> _messageBus = new();
 
     private TripApplicationService CreateService() =>
-        new(_writer.Object, _reader.Object, _pricing.Object);
+        new(
+            _writer.Object,
+            _reader.Object,
+            _workflow.Object,
+            new ImmediateTripUnitOfWork(),
+            _notifier.Object,
+            _pricing.Object,
+            _messageBus.Object,
+            Microsoft.Extensions.Options.Options.Create(new TripMatchingOptions()));
 
     private static CreateTripRequest ValidRequest() =>
         new(Guid.NewGuid(), "Bến Thành", "Sân bay", 10.7769, 106.7009, 8, 25);
@@ -89,14 +101,21 @@ public sealed class TripApplicationServiceTests
     [Fact]
     public async Task ConfirmPrice_ChangesStateAndPersistsTrip()
     {
-        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 100);
+        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 100, 10.7, 106.7);
         _reader.Setup(reader => reader.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(trip);
+        _workflow.Setup(workflow => workflow.GetInvitedDriverIdsAsync(
+                trip.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Guid>());
 
         await CreateService().ConfirmPriceAsync(trip.Id, TestContext.Current.CancellationToken);
 
         Assert.Equal(TripStatus.PriceConfirmed, trip.Status);
         _writer.Verify(writer => writer.SaveAsync(trip, It.IsAny<CancellationToken>()), Times.Once);
+        _messageBus.Verify(bus => bus.SendFindDriverAsync(
+            It.Is<SwiftRide.Contracts.Matching.FindDriverForTripV1>(message =>
+                message.TripId == trip.Id && message.Attempt == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -114,5 +133,16 @@ public sealed class TripApplicationServiceTests
 
         _writer.Verify(writer => writer.SaveAsync(
             It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private sealed class ImmediateTripUnitOfWork : ITripUnitOfWork
+    {
+        public Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken ct) =>
+            operation(ct);
+
+        public Task<T> ExecuteAsync<T>(
+            Func<CancellationToken, Task<T>> operation,
+            CancellationToken ct) =>
+            operation(ct);
     }
 }

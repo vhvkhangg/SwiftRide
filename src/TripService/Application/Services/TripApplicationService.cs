@@ -15,6 +15,7 @@ public sealed class TripApplicationService : ITripApplicationService
     private readonly ITripWriter _writer;
     private readonly ITripReader _reader;
     private readonly ITripWorkflowRepository _workflow;
+    private readonly ITripUnitOfWork _unitOfWork;
     private readonly ITripNotifier _notifier;
     private readonly IMatchingPricingClient _matchingPricing;
     private readonly ITripMessageBus _messageBus;
@@ -24,6 +25,7 @@ public sealed class TripApplicationService : ITripApplicationService
         ITripWriter writer,
         ITripReader reader,
         ITripWorkflowRepository workflow,
+        ITripUnitOfWork unitOfWork,
         ITripNotifier notifier,
         IMatchingPricingClient matchingPricing,
         ITripMessageBus messageBus,
@@ -32,6 +34,7 @@ public sealed class TripApplicationService : ITripApplicationService
         _writer = writer;
         _reader = reader;
         _workflow = workflow;
+        _unitOfWork = unitOfWork;
         _notifier = notifier;
         _matchingPricing = matchingPricing;
         _messageBus = messageBus;
@@ -88,23 +91,26 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task ConfirmPriceAsync(Guid tripId, CancellationToken ct = default)
     {
-        var trip = await GetTripAsync(tripId, ct);
-        var changed = trip.Status == TripStatus.Requested;
-
-        trip.ConfirmPrice();
-        if (trip.Status != TripStatus.PriceConfirmed)
-            throw new InvalidOperationException("Chỉ có thể xác nhận giá cho chuyến đang chờ Rider.");
-
-        if (trip.MatchingAttempt == 0)
+        await _unitOfWork.ExecuteAsync(async transactionCt =>
         {
-            trip.BeginMatchingAttempt(_options.MaxAttempts);
-            changed = true;
-        }
+            var trip = await GetTripAsync(tripId, transactionCt);
+            var changed = trip.Status == TripStatus.Requested;
 
-        if (changed)
-            await _writer.SaveAsync(trip, ct);
+            trip.ConfirmPrice();
+            if (trip.Status != TripStatus.PriceConfirmed)
+                throw new InvalidOperationException("Chỉ có thể xác nhận giá cho chuyến đang chờ Rider.");
 
-        await SendFindDriverAsync(trip, trip.MatchingAttempt, ct);
+            if (trip.MatchingAttempt == 0)
+            {
+                trip.BeginMatchingAttempt(_options.MaxAttempts);
+                changed = true;
+            }
+
+            if (changed)
+                await _writer.SaveAsync(trip, transactionCt);
+
+            await SendFindDriverAsync(trip, trip.MatchingAttempt, transactionCt);
+        }, ct);
     }
 
     public async Task HandleDriverFoundAsync(DriverFoundForTripV1 result, CancellationToken ct = default)
@@ -187,34 +193,41 @@ public sealed class TripApplicationService : ITripApplicationService
         bool timeout,
         CancellationToken ct)
     {
-        var trip = await GetTripAsync(tripId, ct);
-        if (trip.Status != TripStatus.PriceConfirmed)
-            throw new InvalidOperationException("Chuyến không còn chờ phản hồi tài xế.");
-
-        var invitation = await _workflow.GetActiveInvitationAsync(
-            tripId, driverId, DateTime.UtcNow, ct);
-        if (!timeout && invitation is null)
-            throw new InvalidOperationException("Lời mời không còn hiệu lực.");
-
-        var invitationAttempt = attempt ?? invitation!.Attempt;
-        if (invitationAttempt != trip.MatchingAttempt)
-            return;
-
-        var resolved = await _workflow.ResolveInvitationAsync(
-            tripId, driverId, invitationAttempt, DateTime.UtcNow, timeout, ct);
-        if (!resolved)
-            return;
-
-        if (trip.MatchingAttempt >= _options.MaxAttempts)
+        var response = await _unitOfWork.ExecuteAsync(async transactionCt =>
         {
-            trip.MarkFailed();
-            await SaveAndNotifyAsync(trip, ct);
-            return;
-        }
+            var trip = await GetTripAsync(tripId, transactionCt);
+            if (trip.Status != TripStatus.PriceConfirmed)
+                throw new InvalidOperationException("Chuyến không còn chờ phản hồi tài xế.");
 
-        var nextAttempt = trip.BeginMatchingAttempt(_options.MaxAttempts);
-        await _writer.SaveAsync(trip, ct);
-        await SendFindDriverAsync(trip, nextAttempt, ct);
+            var invitation = await _workflow.GetActiveInvitationAsync(
+                tripId, driverId, DateTime.UtcNow, transactionCt);
+            if (!timeout && invitation is null)
+                throw new InvalidOperationException("Lời mời không còn hiệu lực.");
+
+            var invitationAttempt = attempt ?? invitation!.Attempt;
+            if (invitationAttempt != trip.MatchingAttempt)
+                return null;
+
+            var resolved = await _workflow.ResolveInvitationAsync(
+                tripId, driverId, invitationAttempt, DateTime.UtcNow, timeout, transactionCt);
+            if (!resolved)
+                return null;
+
+            if (trip.MatchingAttempt >= _options.MaxAttempts)
+            {
+                trip.MarkFailed();
+                await _writer.SaveAsync(trip, transactionCt);
+                return ToResponse(trip);
+            }
+
+            var nextAttempt = trip.BeginMatchingAttempt(_options.MaxAttempts);
+            await _writer.SaveAsync(trip, transactionCt);
+            await SendFindDriverAsync(trip, nextAttempt, transactionCt);
+            return null;
+        }, ct);
+
+        if (response is not null)
+            await _notifier.NotifyTripChangedAsync(response, ct);
     }
 
     public async Task StartEnRouteAsync(Guid tripId, CancellationToken ct = default)
@@ -233,43 +246,48 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task DropoffAsync(Guid tripId, CancellationToken ct = default)
     {
-        var trip = await GetTripAsync(tripId, ct);
-        if (trip.DriverId is null || trip.FareEstimate is null or <= 0)
-            throw new InvalidOperationException("Trip thiếu Driver hoặc giá hợp lệ để thanh toán.");
+        var response = await _unitOfWork.ExecuteAsync(async transactionCt =>
+        {
+            var trip = await GetTripAsync(tripId, transactionCt);
+            if (trip.DriverId is null || trip.FareEstimate is null or <= 0)
+                throw new InvalidOperationException("Trip thiếu Driver hoặc giá hợp lệ để thanh toán.");
 
-        if (trip.Status == TripStatus.PickedUp)
-        {
-            trip.Dropoff();
-            trip.MarkPaymentPending();
-            await _writer.SaveAsync(trip, ct);
-        }
-        else if (trip.Status != TripStatus.PaymentPending)
-        {
-            throw new InvalidOperationException("Chuyến chưa ở trạng thái có thể thanh toán.");
-        }
+            if (trip.Status == TripStatus.PickedUp)
+            {
+                trip.Dropoff();
+                trip.MarkPaymentPending();
+                await _writer.SaveAsync(trip, transactionCt);
+            }
+            else if (trip.Status != TripStatus.PaymentPending)
+            {
+                throw new InvalidOperationException("Chuyến chưa ở trạng thái có thể thanh toán.");
+            }
 
-        var payment = new ProcessPaymentV1
-        {
-            CorrelationId = trip.Id,
-            TripId = trip.Id,
-            Amount = trip.FareEstimate.Value,
-            Currency = "VND",
-            IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
-            PayerAccount = $"rider-{trip.RiderId:D}",
-            PayeeAccount = $"driver-{trip.DriverId.Value:D}",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
+            var payment = new ProcessPaymentV1
+            {
+                CorrelationId = trip.Id,
+                TripId = trip.Id,
+                Amount = trip.FareEstimate.Value,
+                Currency = "VND",
+                IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
+                PayerAccount = $"rider-{trip.RiderId:D}",
+                PayeeAccount = $"driver-{trip.DriverId.Value:D}",
+                OccurredAtUtc = DateTimeOffset.UtcNow
+            };
 
-        try
-        {
-            await _messageBus.SendPaymentAsync(payment, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new TripMessagePublishException(trip.Id, "Không gửi được yêu cầu thanh toán.", ex);
-        }
+            try
+            {
+                await _messageBus.SendPaymentAsync(payment, transactionCt);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new TripMessagePublishException(trip.Id, "Không gửi được yêu cầu thanh toán.", ex);
+            }
 
-        await _notifier.NotifyTripChangedAsync(ToResponse(trip), ct);
+            return ToResponse(trip);
+        }, ct);
+
+        await _notifier.NotifyTripChangedAsync(response, ct);
     }
 
     public async Task CancelAsync(Guid tripId, CancellationToken ct = default)
