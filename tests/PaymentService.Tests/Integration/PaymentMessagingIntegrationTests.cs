@@ -61,14 +61,27 @@ public sealed class PaymentMessagingIntegrationTests
     }
 
     private static PaymentApplicationService CreateService(
-        PaymentDbContext db)
+        PaymentDbContext db,
+        CreatePaymentRequest request)
     {
-        // Messaging path không gọi REST TripService.
-        var tripClient = Mock.Of<ITripServiceClient>();
+        var riderId = Guid.ParseExact(request.PayerAccount["rider-".Length..], "D");
+        var driverId = Guid.ParseExact(request.PayeeAccount["driver-".Length..], "D");
+        var trip = new TripSnapshot(
+            request.TripId,
+            riderId,
+            driverId,
+            request.Amount,
+            TripStatusCode.PaymentPending);
+
+        var tripClient = new Mock<ITripServiceClient>(MockBehavior.Strict);
+        tripClient.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(trip);
 
         return new PaymentApplicationService(
             new PaymentRepository(db),
-            tripClient);
+            tripClient.Object);
     }
 
     [Fact]
@@ -83,7 +96,7 @@ public sealed class PaymentMessagingIntegrationTests
 
         await using (var db = new PaymentDbContext(options))
         {
-            var result = await CreateService(db)
+            var result = await CreateService(db, request)
                 .ProcessPaymentCommandAsync(request, ct);
 
             Assert.Equal("Succeeded", result.Status);
@@ -91,10 +104,9 @@ public sealed class PaymentMessagingIntegrationTests
             firstId = result.Id;
         }
 
-        // Giả lập một lượt xử lý mới, với DbContext khác.
         await using (var db = new PaymentDbContext(options))
         {
-            var result = await CreateService(db)
+            var result = await CreateService(db, request)
                 .ProcessPaymentCommandAsync(request, ct);
 
             Assert.Equal(firstId, result.Id);
@@ -119,7 +131,7 @@ public sealed class PaymentMessagingIntegrationTests
 
         await using (var db = new PaymentDbContext(options))
         {
-            await CreateService(db)
+            await CreateService(db, request)
                 .ProcessPaymentCommandAsync(request, ct);
         }
 
@@ -131,7 +143,7 @@ public sealed class PaymentMessagingIntegrationTests
         await using (var db = new PaymentDbContext(options))
         {
             await Assert.ThrowsAsync<PaymentCommandRejectedException>(
-                () => CreateService(db).ProcessPaymentCommandAsync(
+                () => CreateService(db, request).ProcessPaymentCommandAsync(
                     conflictingRequest, ct));
         }
 
@@ -156,12 +168,11 @@ public sealed class PaymentMessagingIntegrationTests
             await using var transaction =
                 await db.Database.BeginTransactionAsync(ct);
 
-            var result = await CreateService(db)
+            var result = await CreateService(db, request)
                 .ProcessPaymentCommandAsync(request, ct);
 
             paymentId = result.Id;
 
-            // Simulate consumer transaction rollback.
             await transaction.RollbackAsync(ct);
         }
 

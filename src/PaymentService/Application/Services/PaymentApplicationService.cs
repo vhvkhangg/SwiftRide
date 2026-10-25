@@ -97,6 +97,27 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 "Không thể thanh toán bằng IdempotencyKey khác.");
         }
 
+
+        var trip = await _trips.GetByIdAsync(
+            request.TripId,
+            cancellationToken);
+
+        if (trip is null)
+        {
+            throw new PaymentCommandRejectedException(
+                "Không tìm thấy Trip cần thanh toán.");
+        }
+
+        try
+        {
+            ValidateTrip(trip, request);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new PaymentCommandRejectedException(ex.Message);
+        }
+
+
         var payment = await StoreNewPaymentAsync(
             request,
             cancellationToken,

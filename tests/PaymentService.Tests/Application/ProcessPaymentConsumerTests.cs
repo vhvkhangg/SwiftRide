@@ -97,6 +97,10 @@ public sealed class ProcessPaymentConsumerTests
                 e.Amount == message.Amount &&
                 e.Currency == "VND"),
             It.IsAny<CancellationToken>()), Times.Once);
+
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentFailedV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -141,8 +145,9 @@ public sealed class ProcessPaymentConsumerTests
     }
 
 
+
     [Fact]
-    public async Task BusinessRejection_ShouldPublishPaymentFailed()
+    public async Task BusinessConflict_ShouldNotPublishPaymentResult()
     {
         var message = NewMessage();
         var context = CreateContext(message);
@@ -151,23 +156,24 @@ public sealed class ProcessPaymentConsumerTests
                 It.IsAny<CreatePaymentRequest>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new PaymentCommandRejectedException(
-                "Trip đã được thanh toán."));
+                "IdempotencyKey đã được sử dụng."));
 
-        var consumer = new ProcessPaymentConsumer(_service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
+        var consumer = new ProcessPaymentConsumer(
+            _service.Object,
+            NullLogger<ProcessPaymentConsumer>.Instance);
 
-        await consumer.Consume(context.Object);
-
-        context.Verify(x => x.Publish(
-            It.Is<PaymentFailedV1>(e =>
-                e.CorrelationId == message.CorrelationId &&
-                e.TripId == message.TripId &&
-                e.IdempotencyKey == message.IdempotencyKey),
-            It.IsAny<CancellationToken>()), Times.Once);
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(
+            () => consumer.Consume(context.Object));
 
         context.Verify(x => x.Publish(
             It.IsAny<PaymentSucceededV1>(),
             It.IsAny<CancellationToken>()), Times.Never);
+
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentFailedV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
+
 
     [Fact]
     public async Task InfrastructureFailure_ShouldNotPublishPaymentFailed()

@@ -564,32 +564,36 @@ public sealed class PaymentApplicationServiceTests
 
 
     [Fact]
-    public async Task ProcessCommand_NewPayment_ShouldNotCallTripService()
+    public async Task ProcessCommand_NewPayment_ShouldValidateTripWithoutMarkPaid()
     {
-        var (request, _) = NewRequest();
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
 
         var result = await _service.ProcessPaymentCommandAsync(
             request,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(
-            PaymentStatus.Succeeded.ToString(),
-            result.Status);
-
+        Assert.Equal(PaymentStatus.Succeeded.ToString(), result.Status);
         Assert.False(result.IsTripSynced);
 
         _repo.Verify(x => x.AddAsync(
             It.IsAny<Payment>(),
             It.IsAny<CancellationToken>()), Times.Once);
-
         _repo.Verify(x => x.AddLedgerEntriesAsync(
-            It.Is<IEnumerable<LedgerEntry>>(
-                entries => entries.Count() == 2),
+            It.Is<IEnumerable<LedgerEntry>>(entries => entries.Count() == 2),
             It.IsAny<CancellationToken>()), Times.Once);
-
         _repo.Verify(x => x.SaveChangesAsync(
             It.IsAny<CancellationToken>()), Times.Once);
 
+        _trip.Verify(x => x.GetByIdAsync(
+            request.TripId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         _trip.VerifyNoOtherCalls();
     }
 
@@ -667,8 +671,11 @@ public sealed class PaymentApplicationServiceTests
     [Fact]
     public async Task ProcessCommand_ConcurrentDuplicateKey_ShouldPropagate()
     {
-        var (request, _) = NewRequest();
-
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
         _repo.Setup(x => x.SaveChangesAsync(
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DuplicateIdempotencyKeyException(
@@ -679,6 +686,12 @@ public sealed class PaymentApplicationServiceTests
                 request,
                 TestContext.Current.CancellationToken));
 
+        _trip.Verify(x => x.GetByIdAsync(
+            request.TripId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         _trip.VerifyNoOtherCalls();
     }
 
@@ -757,37 +770,124 @@ public sealed class PaymentApplicationServiceTests
     [Fact]
     public async Task ProcessCommand_AfterDuplicateConflict_ShouldReuseWinner()
     {
-        var (request, _) = NewRequest();
+        var (request, snapshot) = NewRequest();
         var winner = Payment.Create(
-        request.TripId,
-        request.Amount,
-        request.IdempotencyKey,
-        request.PayerAccount,
-        request.PayeeAccount);
+            request.TripId,
+            request.Amount,
+            request.IdempotencyKey,
+            request.PayerAccount,
+            request.PayeeAccount);
         winner.MarkSucceeded();
+
         _repo.SetupSequence(x => x.GetByIdempotencyKeyAsync(
-        request.IdempotencyKey,
-        It.IsAny<CancellationToken>()))
-        .ReturnsAsync((Payment?)null)
-        .ReturnsAsync(winner);
+                request.IdempotencyKey,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Payment?)null)
+            .ReturnsAsync(winner);
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
         _repo.Setup(x => x.SaveChangesAsync(
-        It.IsAny<CancellationToken>()))
-        .ThrowsAsync(new DuplicateIdempotencyKeyException(
-        new Exception("Simulated concurrent insert")));
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DuplicateIdempotencyKeyException(
+                new Exception("Simulated concurrent insert")));
+
         await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(
-        () => _service.ProcessPaymentCommandAsync(
-        request,
-        TestContext.Current.CancellationToken));
+            () => _service.ProcessPaymentCommandAsync(
+                request,
+                TestContext.Current.CancellationToken));
+
         var retry = await _service.ProcessPaymentCommandAsync(
-        request,
-        TestContext.Current.CancellationToken);
+            request,
+            TestContext.Current.CancellationToken);
+
         Assert.Equal(winner.Id, retry.Id);
         Assert.Equal("Succeeded", retry.Status);
         _repo.Verify(x => x.AddAsync(
-        It.IsAny<Payment>(),
-        It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Once);
         _repo.Verify(x => x.SaveChangesAsync(
-        It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.GetByIdAsync(
+            request.TripId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         _trip.VerifyNoOtherCalls();
+    }
+
+    private async Task AssertCommandRejectedBeforePersistingAsync(
+        CreatePaymentRequest request)
+    {
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(
+            () => _service.ProcessPaymentCommandAsync(
+                request,
+                TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.IsAny<IEnumerable<LedgerEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+        _trip.Verify(x => x.GetByIdAsync(
+            request.TripId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _trip.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_TripNotFound_ShouldRejectBeforePersisting()
+    {
+        var (request, _) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((TripSnapshot?)null);
+
+        await AssertCommandRejectedBeforePersistingAsync(request);
+    }
+
+    [Fact]
+    public async Task ProcessCommand_TripNotPaymentPending_ShouldRejectBeforePersisting()
+    {
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot with { Status = TripStatusCode.PickedUp });
+
+        await AssertCommandRejectedBeforePersistingAsync(request);
+    }
+
+    [Fact]
+    public async Task ProcessCommand_TripAmountMismatch_ShouldRejectBeforePersisting()
+    {
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot with { FareEstimate = request.Amount + 1000m });
+
+        await AssertCommandRejectedBeforePersistingAsync(request);
+    }
+
+    [Fact]
+    public async Task ProcessCommand_TripPayeeMismatch_ShouldRejectBeforePersisting()
+    {
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot with { DriverId = Guid.NewGuid() });
+
+        await AssertCommandRejectedBeforePersistingAsync(request);
     }
 }
