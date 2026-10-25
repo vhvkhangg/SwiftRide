@@ -138,7 +138,14 @@ public static class TripEndpoints
             var trip = await db.Trips.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             return trip is null
                 ? Results.NotFound()
-                : Results.Ok(new { trip.Id, trip.RiderId, Status = trip.Status.ToString() });
+                : Results.Ok(new
+                {
+                    trip.Id,
+                    trip.RiderId,
+                    trip.DriverId,
+                    trip.FareEstimate,
+                    Status = trip.Status.ToString()
+                });
         }).RequireAuthorization("InternalRead");
         app.MapPost("/internal/trips/{id:guid}/pay", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
         { await service.MarkPaidAsync(id, ct); return Results.NoContent(); }).RequireAuthorization("Payments");
