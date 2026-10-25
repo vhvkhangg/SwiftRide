@@ -12,14 +12,23 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
 {
     private readonly IPaymentApplicationService _payments;
 
+    private readonly ILogger<ProcessPaymentConsumer> _logger;
+
     public ProcessPaymentConsumer(
-        IPaymentApplicationService payments)
+        IPaymentApplicationService payments,
+        ILogger<ProcessPaymentConsumer> logger)
     {
         _payments = payments;
+        _logger = logger;
     }
 
     public async Task Consume(ConsumeContext<ProcessPaymentV1> context)
     {
+        _logger.LogInformation(
+            "Processing payment command. TripId={TripId}, CorrelationId={CorrelationId}",
+            context.Message.TripId,
+            context.Message.CorrelationId);
+
         var request = ProcessPaymentV1Mapper.ToRequest(context.Message);
         PaymentResponse payment;
         try
@@ -36,6 +45,12 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
                 Reason = ex.Message,
                 OccurredAtUtc = DateTimeOffset.UtcNow
             }, context.CancellationToken);
+
+            _logger.LogWarning(
+                "Payment rejected. TripId={TripId}, Reason={Reason}",
+                context.Message.TripId,
+                ex.Message);
+
             return;
         }
 
@@ -49,6 +64,12 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
                 Reason = $"Payment kết thúc với trạng thái '{payment.Status}'.",
                 OccurredAtUtc = DateTimeOffset.UtcNow
             }, context.CancellationToken);
+
+            _logger.LogInformation(
+                "Payment success event staged. PaymentId={PaymentId}, TripId={TripId}",
+                payment.Id,
+                payment.TripId);
+
             return;
         }
 

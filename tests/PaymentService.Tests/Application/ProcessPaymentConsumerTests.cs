@@ -6,6 +6,8 @@ using SwiftRide.PaymentService.Application.Consumers;
 using SwiftRide.PaymentService.Application.DTOs;
 using SwiftRide.PaymentService.Application.Services;
 using Xunit;
+using SwiftRide.PaymentService.Application.Exceptions;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SwiftRide.PaymentService.Tests.Application;
 
@@ -46,6 +48,11 @@ public sealed class ProcessPaymentConsumerTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        context.Setup(x => x.Publish(
+                It.IsAny<PaymentFailedV1>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         return context;
     }
 
@@ -71,7 +78,7 @@ public sealed class ProcessPaymentConsumerTests
             .ReturnsAsync(response);
 
         var context = CreateContext(message);
-        var consumer = new ProcessPaymentConsumer(_service.Object);
+        var consumer = new ProcessPaymentConsumer(_service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
 
         await consumer.Consume(context.Object);
 
@@ -99,7 +106,7 @@ public sealed class ProcessPaymentConsumerTests
         message.Currency = "USD";
 
         var context = CreateContext(message);
-        var consumer = new ProcessPaymentConsumer(_service.Object);
+        var consumer = new ProcessPaymentConsumer(_service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => consumer.Consume(context.Object));
@@ -123,10 +130,65 @@ public sealed class ProcessPaymentConsumerTests
                 "Simulated payment processing failure"));
 
         var context = CreateContext(message);
-        var consumer = new ProcessPaymentConsumer(_service.Object);
+        var consumer = new ProcessPaymentConsumer(_service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => consumer.Consume(context.Object));
+
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentSucceededV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+
+    [Fact]
+    public async Task BusinessRejection_ShouldPublishPaymentFailed()
+    {
+        var message = NewMessage();
+        var context = CreateContext(message);
+
+        _service.Setup(x => x.ProcessPaymentCommandAsync(
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PaymentCommandRejectedException(
+                "Trip đã được thanh toán."));
+
+        var consumer = new ProcessPaymentConsumer(_service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
+
+        await consumer.Consume(context.Object);
+
+        context.Verify(x => x.Publish(
+            It.Is<PaymentFailedV1>(e =>
+                e.CorrelationId == message.CorrelationId &&
+                e.TripId == message.TripId &&
+                e.IdempotencyKey == message.IdempotencyKey),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentSucceededV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task InfrastructureFailure_ShouldNotPublishPaymentFailed()
+    {
+        var message = NewMessage();
+        var context = CreateContext(message);
+
+        _service.Setup(x => x.ProcessPaymentCommandAsync(
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException(
+                "Simulated database timeout"));
+
+        var consumer = new ProcessPaymentConsumer(_service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => consumer.Consume(context.Object));
+
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentFailedV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
 
         context.Verify(x => x.Publish(
             It.IsAny<PaymentSucceededV1>(),
