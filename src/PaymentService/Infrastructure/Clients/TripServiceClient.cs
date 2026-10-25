@@ -13,25 +13,47 @@ public sealed class TripServiceClient : ITripServiceClient
         _httpClient = httpClient;
     }
 
+    private sealed record TripHttpSnapshot(
+        Guid Id,
+        Guid RiderId,
+        Guid? DriverId,
+        decimal? FareEstimate,
+        string Status);
+
     public async Task<TripSnapshot?> GetByIdAsync(
         Guid tripId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         using var response = await _httpClient.GetAsync(
             $"internal/trips/{tripId:D}",
-            cancellationToken
-        );
+            cancellationToken);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
-        {
             return null;
-        }
 
         response.EnsureSuccessStatusCode();
 
-        return await response.Content.ReadFromJsonAsync<TripSnapshot>(cancellationToken);
+        var data = await response.Content
+            .ReadFromJsonAsync<TripHttpSnapshot>(
+                cancellationToken: cancellationToken);
+
+        if (data is null ||
+            !Enum.TryParse<TripStatusCode>(
+                data.Status, true, out var status) ||
+            !Enum.IsDefined(status))
+        {
+            throw new InvalidOperationException(
+                "TripService trả về snapshot không hợp lệ.");
+        }
+
+        return new TripSnapshot(
+            data.Id,
+            data.RiderId,
+            data.DriverId,
+            data.FareEstimate,
+            status);
     }
+
 
     public async Task MarkPaidAsync(
         Guid tripId,

@@ -12,44 +12,61 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
 {
     private readonly IPaymentApplicationService _payments;
 
+    private readonly ILogger<ProcessPaymentConsumer> _logger;
+
     public ProcessPaymentConsumer(
-        IPaymentApplicationService payments)
+        IPaymentApplicationService payments,
+        ILogger<ProcessPaymentConsumer> logger)
     {
         _payments = payments;
+        _logger = logger;
     }
 
     public async Task Consume(ConsumeContext<ProcessPaymentV1> context)
     {
+        _logger.LogInformation(
+            "Processing payment command. TripId={TripId}, CorrelationId={CorrelationId}",
+            context.Message.TripId,
+            context.Message.CorrelationId);
+
         var request = ProcessPaymentV1Mapper.ToRequest(context.Message);
+
         PaymentResponse payment;
+
         try
         {
-            payment = await _payments.ProcessPaymentCommandAsync(request, context.CancellationToken);
+            payment = await _payments.ProcessPaymentCommandAsync(
+                request,
+                context.CancellationToken);
         }
         catch (PaymentCommandRejectedException ex)
         {
-            await context.Publish(new PaymentFailedV1
-            {
-                CorrelationId = context.Message.CorrelationId,
-                TripId = context.Message.TripId,
-                IdempotencyKey = context.Message.IdempotencyKey,
-                Reason = ex.Message,
-                OccurredAtUtc = DateTimeOffset.UtcNow
-            }, context.CancellationToken);
-            return;
+            _logger.LogWarning(
+                ex,
+                "Payment command rejected. TripId={TripId}, CorrelationId={CorrelationId}",
+                context.Message.TripId,
+                context.Message.CorrelationId);
+
+            throw;
         }
 
         if (payment.Status != nameof(PaymentStatus.Succeeded))
         {
-            await context.Publish(new PaymentFailedV1
-            {
-                CorrelationId = context.Message.CorrelationId,
-                TripId = context.Message.TripId,
-                IdempotencyKey = context.Message.IdempotencyKey,
-                Reason = $"Payment kết thúc với trạng thái '{payment.Status}'.",
-                OccurredAtUtc = DateTimeOffset.UtcNow
-            }, context.CancellationToken);
-            return;
+            throw new PaymentCommandRejectedException(
+                $"Không thể phát PaymentSucceededV1 " +
+                $"cho Payment có trạng thái '{payment.Status}'.");
+        }
+
+        if (payment.Id == Guid.Empty ||
+            payment.TripId != request.TripId ||
+            payment.Amount != request.Amount ||
+            !string.Equals(
+                payment.IdempotencyKey,
+                request.IdempotencyKey,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Kết quả xử lý Payment không khớp command đầu vào.");
         }
 
         await context.Publish(
@@ -63,5 +80,10 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
                 OccurredAtUtc = DateTimeOffset.UtcNow
             }, context.CancellationToken
         );
+
+        _logger.LogInformation(
+            "Payment success event staged. PaymentId={PaymentId}, TripId={TripId}",
+            payment.Id,
+            payment.TripId);
     }
 }
