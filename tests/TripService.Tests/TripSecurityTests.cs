@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -87,6 +88,123 @@ public sealed class TripSecurityTests
         await Check(paymentPath, Token("matching-service", "", true), HttpStatusCode.Forbidden);
         await Check(paymentPath, Token("payment-service", "", true), HttpStatusCode.NoContent);
         await Check("/trips/", Token("payment-service", "Rider", true), HttpStatusCode.Unauthorized, true);
+        await app.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task InternalSnapshot_WithInternalReadToken_ReturnsAllRequiredFields()
+    {
+        var dbRoot = new InMemoryDatabaseRoot();
+        var dbName = $"snapshot-test-{Guid.NewGuid()}";
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
+            ["JwtSettings:Audience"] = "SwiftRide.Client",
+            ["JwtSettings:SecretKey"] = UserKey,
+            ["ServiceAuth:SecretKey"] = ServiceKey
+        });
+        var security = typeof(TripEndpoints).Assembly.GetType("SwiftRide.Security.ServiceSecurity")!;
+        security.GetMethod("AddServiceSecurity")!.Invoke(null, [builder.Services, builder.Configuration]);
+        
+        builder.Services.AddDbContext<TripDbContext>(options =>
+            options.UseInMemoryDatabase(dbName, dbRoot));
+            
+        var trips = new Mock<ITripApplicationService>();
+        builder.Services.AddSingleton(trips.Object);
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapTripEndpoints();
+        await app.StartAsync(TestContext.Current.CancellationToken);
+
+        SwiftRide.TripService.Domain.Entities.Trip seededTrip;
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TripDbContext>();
+            seededTrip = SwiftRide.TripService.Domain.Entities.Trip.Create(
+                Guid.NewGuid(), "A", "B", 99_000m, 10.7, 106.7);
+            seededTrip.ConfirmPrice();
+            seededTrip.BeginMatchingAttempt(3);
+            seededTrip.AcceptByDriver(Guid.NewGuid());
+            seededTrip.StartEnRoute();
+            seededTrip.Pickup();
+            seededTrip.Dropoff();
+            seededTrip.MarkPaymentPending();
+            db.Trips.Add(seededTrip);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        using var req = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/internal/trips/{seededTrip.Id:D}");
+        req.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", Token("payment-service", "", service: true));
+
+        using var response = await client.SendAsync(req, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var json = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(seededTrip.Id.ToString(), json.GetProperty("id").GetString());
+        Assert.Equal(seededTrip.RiderId.ToString(), json.GetProperty("riderId").GetString());
+        Assert.Equal(seededTrip.DriverId!.Value.ToString(), json.GetProperty("driverId").GetString());
+        Assert.Equal(seededTrip.FareEstimate!.Value, json.GetProperty("fareEstimate").GetDecimal());
+        Assert.Equal("PaymentPending", json.GetProperty("status").GetString());
+
+        await app.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task InternalSnapshot_WithoutInternalReadToken_Returns401Or403()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
+            ["JwtSettings:Audience"] = "SwiftRide.Client",
+            ["JwtSettings:SecretKey"] = UserKey,
+            ["ServiceAuth:SecretKey"] = ServiceKey
+        });
+        var security = typeof(TripEndpoints).Assembly.GetType("SwiftRide.Security.ServiceSecurity")!;
+        security.GetMethod("AddServiceSecurity")!.Invoke(null, [builder.Services, builder.Configuration]);
+        builder.Services.AddDbContext<TripDbContext>(options =>
+            options.UseInMemoryDatabase($"snapshot-unauth-{Guid.NewGuid()}"));
+        var trips = new Mock<ITripApplicationService>();
+        builder.Services.AddSingleton(trips.Object);
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapTripEndpoints();
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        var tripId = Guid.NewGuid();
+
+        // Unauthenticated call
+        using var res1 = await client.GetAsync(
+            $"/internal/trips/{tripId:D}",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, res1.StatusCode);
+
+        // Rider token (wrong policy)
+        using var req2 = new HttpRequestMessage(HttpMethod.Get, $"/internal/trips/{tripId:D}");
+        req2.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", Token(Guid.NewGuid().ToString(), "Rider"));
+        using var res2 = await client.SendAsync(req2, TestContext.Current.CancellationToken);
+        Assert.True(res2.StatusCode == HttpStatusCode.Unauthorized || res2.StatusCode == HttpStatusCode.Forbidden || res2.StatusCode == HttpStatusCode.NotFound);
+
+        // Service token không có quyền
+        using var req3 = new HttpRequestMessage(HttpMethod.Get, $"/internal/trips/{tripId:D}");
+        req3.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", Token("matching-service", "", service: true));
+        using var res3 = await client.SendAsync(req3, TestContext.Current.CancellationToken);
+        Assert.True(res3.StatusCode == HttpStatusCode.Unauthorized || res3.StatusCode == HttpStatusCode.Forbidden || res3.StatusCode == HttpStatusCode.NotFound);
+
         await app.StopAsync(TestContext.Current.CancellationToken);
     }
 

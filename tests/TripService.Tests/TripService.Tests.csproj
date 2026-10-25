@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio">
       <PrivateAssets>all</PrivateAssets>
@@ -16,6 +18,5 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/TripService/TripService.csproj" />
-    <ProjectReference Include="../../src/MatchingService/MatchingService.csproj" />
   </ItemGroup>
 </Project>

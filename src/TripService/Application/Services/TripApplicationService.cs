@@ -322,11 +322,32 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task HandlePaymentSucceededAsync(PaymentSucceededV1 result, CancellationToken ct = default)
     {
+        // All fields must be present and self-consistent before we trust the event.
+        if (result.TripId == Guid.Empty ||
+            result.CorrelationId != result.TripId ||
+            result.PaymentId == Guid.Empty ||
+            result.Amount <= 0 ||
+            !string.Equals(result.Currency, "VND", StringComparison.Ordinal))
+            throw new InvalidOperationException("PaymentSucceededV1 chứa dữ liệu không hợp lệ.");
+
         var trip = await GetTripAsync(result.TripId, ct);
-        if (trip.Status == TripStatus.Paid) return;
-        if (trip.Status != TripStatus.PaymentPending ||
-            trip.FareEstimate != result.Amount)
-            throw new InvalidOperationException("Kết quả thanh toán không khớp trạng thái hoặc giá Trip.");
+
+        // Idempotency guard: if already Paid, verify the event matches what settled the trip.
+        // An event with wrong data should not be silently swallowed just because the trip is Paid.
+        if (trip.Status == TripStatus.Paid)
+        {
+            if (trip.FareEstimate != result.Amount)
+                throw new InvalidOperationException(
+                    "PaymentSucceededV1 tham chiếu Trip đã Paid nhưng Amount không khớp.");
+            return;
+        }
+
+        if (trip.Status != TripStatus.PaymentPending)
+            throw new InvalidOperationException(
+                $"Trip không ở trạng thái chờ thanh toán: '{trip.Status}'.");
+
+        if (trip.FareEstimate != result.Amount)
+            throw new InvalidOperationException("Số tiền PaymentSucceededV1 không khớp FareEstimate của Trip.");
 
         trip.MarkPaid();
         await SaveAndNotifyAsync(trip, ct);
@@ -334,6 +355,15 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task HandlePaymentFailedAsync(PaymentFailedV1 result, CancellationToken ct = default)
     {
+        if (result.TripId == Guid.Empty) return;
+
+        // Guard against stale events from a different payment attempt:
+        // the idempotency key must match the one TripService would have sent.
+        var expectedKeyPrefix = $"trip-{result.TripId:N}-payment-v1";
+        if (!string.IsNullOrWhiteSpace(result.IdempotencyKey) &&
+            !string.Equals(result.IdempotencyKey, expectedKeyPrefix, StringComparison.Ordinal))
+            return;
+
         var trip = await GetTripAsync(result.TripId, ct);
         if (trip.Status != TripStatus.PaymentPending) return;
 
