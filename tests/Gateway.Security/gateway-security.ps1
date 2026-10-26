@@ -1,21 +1,40 @@
 param(
     [string]$BaseUrl = "http://localhost:5100",
     [string]$SeedPassword = "SwiftRide-demo-2026!",
-    [string]$DirectTripUrl = ""
+    [string]$DirectTripUrl = "",
+    [ValidateRange(5, 120)][int]$WaitSeconds = 45
 )
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot/signalr-helpers.ps1"
 $checks = 0
-function Call([string]$Method, [string]$Path, $Body, [string]$Token, [int]$Expected) {
+function Call([string]$Method, [string]$Path, $Body, [string]$Token, [int[]]$Expected) {
     $parameters = @{ Uri = "$BaseUrl$Path"; Method = $Method; SkipHttpErrorCheck = $true; TimeoutSec = 15 }
-    if ($Body) { $parameters.Body = $Body | ConvertTo-Json -Depth 10; $parameters.ContentType = "application/json" }
-    if ($Token) { $parameters.Headers = @{Authorization = "Bearer $Token"; "X-User-Roles" = "Admin"; "X-User-Id" = [guid]::NewGuid().ToString()} }
+    if ($null -ne $Body) { $parameters.Body = $Body | ConvertTo-Json -Depth 10; $parameters.ContentType = "application/json" }
+    $parameters.Headers = @{"X-User-Roles" = "Admin"; "X-User-Id" = [guid]::NewGuid().ToString()}
+    if ($Token) { $parameters.Headers.Authorization = "Bearer $Token" }
     $response = Invoke-WebRequest @parameters
-    if ([int]$response.StatusCode -ne $Expected) { throw "$Method $Path expected $Expected, got $($response.StatusCode): $($response.Content)" }
+    if ([int]$response.StatusCode -notin $Expected) { throw "$Method $Path expected $Expected, got $($response.StatusCode): $($response.Content)" }
     $script:checks++
+    if ($response.StatusCode -eq 404) { return $null }
     if ($response.Content) { return $response.Content | ConvertFrom-Json }
 }
 function Login([string]$Email) {
     (Call POST "/auth/login" @{email=$Email;password=$SeedPassword} "" 200).accessToken
+}
+function NewTrip([string]$Token) {
+    Call POST "/api/trips/" @{
+        riderId=[guid]::NewGuid().ToString();pickupAddress="Gateway test pickup";dropoffAddress="Gateway test destination"
+        pickupLatitude=10.77;pickupLongitude=106.69;distance=2;estimatedTime=5;rideType="standard"
+    } $Token 201
+}
+function WaitInvitation([string]$TripId, [string]$Token) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
+    do {
+        $invitations = @(Call GET "/api/trips/driver/invitations" $null $Token 200)
+        if ($invitations.id -contains $TripId) { return }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Invitation timeout for $TripId. Check matching consumer, candidate data and error queues."
 }
 $null = Call GET "/auth/me" $null "" 401
 $tag = [guid]::NewGuid().ToString("N")
@@ -30,67 +49,86 @@ $driverOther = Login "driver.other@example.com"
 $me = Call GET "/auth/me" $null $rider 200
 if ($me.roles -notcontains "Rider" -or $me.roles -contains "Admin") { throw "Public role escalation." }
 $driverMe = Call GET "/auth/me" $null $driver 200
-
-$null = Call POST "/api/trips/" @{pickupAddress="A";dropoffAddress="B";fareEstimate=100} "" 401
-$trip = Call POST "/api/trips/" @{riderId=[guid]::NewGuid().ToString();pickupAddress="A";dropoffAddress="B";fareEstimate=100;pickupLatitude=10.77;pickupLongitude=106.69} $rider 201
-if ($trip.riderId -ne $me.id) { throw "RiderId trusted from body." }
-$id = $trip.id
-$null = Call GET "/api/trips/$id" $null $rider 200
-$null = Call GET "/api/trips/$id" $null $other 403
-$null = Call POST "/api/trips/$id/cancel" @{} $other 403
-$null = Call POST "/api/trips/$id/driver-accept" @{} $driver 403
+$null = Call GET "/api/trips/driver/invitations" $null "" 401
+$null = Call GET "/api/trips/driver/invitations" $null "invalid-token" 401
+$null = Call GET "/api/trips/driver/invitations" $null $rider 403
+$null = Call POST "/api/hubs/trips/negotiate?negotiateVersion=1" $null "" 401
+$null = Call POST "/api/hubs/trips/negotiate?negotiateVersion=1" $null $rider 200
+$null = Call POST "/api/trips/" @{} "" 401
+$null = Call POST "/api/trips/" @{} $driver 403
 $null = Call POST "/api/drivers/location" @{latitude=10.77;longitude=106.69;isAvailable=$true} $rider 403
-$location = Call POST "/api/drivers/location" @{driverId="spoofed";latitude=10.77;longitude=106.69;isAvailable=$true} $driver 200
-if ($location.driverId -ne $driverMe.id) { throw "DriverId trusted from body." }
-$null = Call POST "/api/matching/quote" @{distance=2;estimatedTime=5;surge=1} $rider 200
-$null = Call POST "/api/matching/match" @{tripId=$id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $other 403
-$matched = Call POST "/api/matching/match" @{tripId=$id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $rider 200
-if ($matched.drivers.driverId -notcontains $driverMe.id) { throw "Driver not returned by Matching." }
-$null = Call POST "/api/trips/$id/driver-accept" @{driverId=[guid]::NewGuid().ToString()} $driver 204
-$accepted = Call GET "/api/trips/$id" $null $driver 200
-if ($accepted.driverId -ne $driverMe.id) { throw "Accept used body DriverId." }
-$null = Call POST "/api/trips/$id/enroute" @{} $driverOther 403
-$null = Call POST "/api/trips/$id/enroute" @{} $rider 403
-$null = Call POST "/api/trips/$id/enroute" @{} $driver 204
-$null = Call POST "/api/trips/$id/pickup" @{} $driver 204
-$null = Call POST "/api/trips/$id/dropoff" @{} $driver 204
-foreach ($action in @("pay","fail","payment-pending")) {
-    $null = Call POST "/api/trips/$id/$action" @{} $rider 401
-}
-$paymentBody = @{tripId=$id;amount=100;idempotencyKey="security-$tag";payerAccount="rider-$($me.id)";payeeAccount="driver-$($driverMe.id)"}
-$null = Call POST "/api/payments/" $paymentBody $other 403
-$payment = Call POST "/api/payments/" $paymentBody $rider 201
-if (!$payment.isTripSynced) { throw "Payment did not sync via internal service authentication." }
-$null = Call GET "/api/payments/$($payment.id)" $null $other 403
-$null = Call GET "/api/payments/$($payment.id)" $null $rider 200
-$null = Call GET "/api/payments/trip/$id" $null $other 403
-$null = Call POST "/api/payments/$($payment.id)/refund" @{} $rider 403
-$null = Call GET "/internal/trips/$id" $null $rider 404
-$cancelTrip = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100;pickupLatitude=10.77;pickupLongitude=106.69} $rider 201
-$null = Call POST "/api/trips/$($cancelTrip.id)/cancel" @{} $rider 204
-$null = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100} $driver 403
-
-# Two invited drivers race for the same trip: only one can win.
-$null = Call POST "/api/drivers/location" @{latitude=10.77;longitude=106.69;isAvailable=$true} $driverOther 200
-$raceTrip = Call POST "/api/trips/" @{pickupAddress="C";dropoffAddress="D";fareEstimate=100;pickupLatitude=10.77;pickupLongitude=106.69} $rider 201
-$null = Call POST "/api/matching/match" @{tripId=$raceTrip.id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $rider 200
-$jobs = @($driver,$driverOther) | ForEach-Object {
-    Start-Job -ArgumentList "$BaseUrl/api/trips/$($raceTrip.id)/driver-accept", $_ -ScriptBlock {
-        param($url,$token)
-        [int](Invoke-WebRequest $url -Method Post -Headers @{Authorization="Bearer $token"} -SkipHttpErrorCheck -TimeoutSec 15).StatusCode
+$null = Call POST "/api/drivers/location" @{latitude=10.77;longitude=106.69;isAvailable=$false} $driverOther 200
+$riderSocket = $null
+$driverSocket = $null
+$otherSocket = $null
+try {
+    $riderSocket = Open-HubSocket $BaseUrl $rider $true
+    $driverSocket = Open-HubSocket $BaseUrl $driver
+    $otherSocket = Open-HubSocket $BaseUrl $other $true
+    $location = Call POST "/api/drivers/location" @{driverId="spoofed";latitude=10.77;longitude=106.69;isAvailable=$true} $driver 200
+    if ($location.driverId -ne $driverMe.id) { throw "DriverId trusted from body." }
+    $null = Call POST "/api/matching/quote" @{distance=2;estimatedTime=5} $rider 200
+    $trip = NewTrip $rider
+    if ($trip.riderId -ne $me.id) { throw "RiderId trusted from body." }
+    $id = $trip.id
+    $null = Call GET "/api/trips/$id" $null $rider 200
+    $null = Call GET "/api/trips/$id" $null $other 403
+    $null = Call POST "/api/trips/$id/cancel" @{} $other 403
+    $null = Call POST "/api/trips/$id/confirm-price" @{} $other 403
+    $null = Call POST "/api/trips/$id/confirm-price" @{} $driver 403
+    $null = Call POST "/api/trips/$id/driver-accept" @{} $driver 409
+    $null = Call POST "/api/matching/match" @{tripId=$id;pickupLatitude=10.77;pickupLongitude=106.69;radiusKm=5} $other 403
+    $null = Call POST "/api/trips/$id/confirm-price" @{} $rider 202
+    WaitInvitation $id $driver
+    $invitationEvent = Wait-HubEvent $driverSocket 'driverInvitation' $id $WaitSeconds
+    if ($invitationEvent.fareEstimate -ne $trip.fareEstimate) { throw "SignalR invitation price mismatch." }
+    $others = @(Call GET "/api/trips/driver/invitations" $null $driverOther 200)
+    if ($others.id -contains $id) { throw "Invitation leaked to another driver." }
+    $null = Call POST "/api/trips/$id/driver-accept" @{} $driverOther 403
+    $null = Call POST "/api/trips/$id/driver-accept" @{driverId=[guid]::NewGuid().ToString()} $driver 204
+    $accepted = Call GET "/api/trips/$id" $null $driver 200
+    if ($accepted.driverId -ne $driverMe.id) { throw "Accept used body DriverId." }
+    $null = Wait-HubEvent $riderSocket 'tripChanged' $id
+    $null = Wait-HubEvent $driverSocket 'tripChanged' $id
+    Assert-NoHubInvocation $otherSocket
+    $null = Call POST "/api/trips/$id/driver-accept" @{} $driver 409
+    $null = Call POST "/api/trips/$id/enroute" @{} $driverOther 403
+    $null = Call POST "/api/trips/$id/enroute" @{} $rider 403
+    $null = Call POST "/api/trips/$id/enroute" @{} $driver 204
+    $null = Call POST "/api/trips/$id/pickup" @{} $driver 204
+    foreach ($action in @("pay","fail","payment-pending")) {
+        $null = Call POST "/api/trips/$id/$action" @{} $rider 401
+    }
+    $null = Call GET "/internal/trips/$id" $null $rider 404
+    $null = Call POST "/api/trips/$id/dropoff" @{} $driver 202
+    $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
+    do {
+        $paid = Call GET "/api/trips/$id" $null $rider 200
+        if ($paid.status -eq 7 -or $paid.status -eq "Paid") { break }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($paid.status -ne 7 -and $paid.status -ne "Paid") { throw "Trip did not become Paid; check payment/result consumers and error queues." }
+    $payment = Call GET "/api/payments/trip/$id" $null $rider 200
+    if ($payment.status -ne "Succeeded" -or $payment.amount -ne $trip.fareEstimate) { throw "Payment does not match trip quote." }
+    $null = Call GET "/api/payments/$($payment.id)" $null $other 403
+    $null = Call GET "/api/payments/$($payment.id)" $null $rider 200
+    $null = Call GET "/api/payments/trip/$id" $null $other 403
+    $null = Call POST "/api/payments/$($payment.id)/refund" @{} $rider 403
+    $cancelTrip = NewTrip $rider
+    $null = Call POST "/api/trips/$($cancelTrip.id)/cancel" @{} $rider 204
+    if ($DirectTripUrl) {
+        $response = Invoke-WebRequest "$DirectTripUrl/trips/$id" -Headers @{"X-User-Id"=$me.id;"X-User-Roles"="Rider"} -SkipHttpErrorCheck -TimeoutSec 15
+        if ($response.StatusCode -ne 401) { throw "Direct spoofed headers accepted by service." }
+        $checks++
     }
 }
-try {
-    $statuses = @($jobs | Wait-Job | Receive-Job -ErrorAction Stop)
-    if (@($statuses | Where-Object {$_ -eq 204}).Count -ne 1 -or
-        @($statuses | Where-Object {$_ -eq 409}).Count -ne 1) { throw "Concurrent accept must return one 204 and one 409: $statuses" }
-    $checks += 2
+finally {
+    foreach ($socket in @($riderSocket,$driverSocket,$otherSocket)) {
+        if ($null -ne $socket) { $socket.Dispose() }
+    }
+    foreach ($token in @($driver,$driverOther)) {
+        try { $null = Call POST "/api/drivers/location" @{latitude=10.77;longitude=106.69;isAvailable=$false} $token 200 }
+        catch { Write-Warning "Could not set demo driver offline; check test environment." }
+    }
 }
-finally { $jobs | Remove-Job -Force }
-if ($DirectTripUrl) {
-    $response = Invoke-WebRequest "$DirectTripUrl/trips/$id" -Headers @{"X-User-Id"=$me.id;"X-User-Roles"="Rider"} -SkipHttpErrorCheck
-    if ($response.StatusCode -ne 401) { throw "Direct spoofed headers accepted by service." }
-    $checks++
-}
-Write-Host "PASS: $checks HTTP checks through Gateway (roles, ownership, invitation, matching, payment sync and spoofing)."
-# Unique test accounts/trips/payments remain in the development databases.
+Write-Host "PASS: $checks HTTP checks plus real SignalR invitation/trip events and recipient isolation. Payment completed through messages, without POST /payments."

@@ -40,9 +40,15 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) &&
-                    context.Request.Path.StartsWithSegments("/api/hubs/trips"))
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.WebSockets.IsWebSocketRequest &&
+                    context.Request.Path == "/api/hubs/trips")
                     context.Token = accessToken;
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                if (!Guid.TryParse(context.Principal?.FindFirst("sub")?.Value, out var userId) || userId == Guid.Empty)
+                    context.Fail("Invalid subject.");
                 return Task.CompletedTask;
             }
         };
@@ -92,6 +98,26 @@ if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("Aut
 if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("DevelopmentAccounts:Enabled"))
     await DevelopmentAccounts.SeedAsync(app.Services, builder.Configuration);
 app.UseWebSockets();
+app.UseAuthentication();
+app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"), hub =>
+{
+    hub.Use(async (context, next) =>
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+        if (!context.User.IsInRole("Rider") && !context.User.IsInRole("Driver"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+        foreach (var header in IdentityHeaders.Names) context.Request.Headers.Remove(header);
+        context.Request.Headers.Remove("Cookie");
+        await next(context);
+    });
+});
 await app.UseOcelot();
 await app.RunAsync();
 

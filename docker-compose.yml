@@ -202,7 +202,7 @@ services:
       Routes__8__UpstreamPathTemplate: /api/hubs/trips
       Routes__8__UpstreamHttpMethod__0: GET
       Routes__8__DownstreamPathTemplate: /hubs/trips
-      Routes__8__DownstreamScheme: http
+      Routes__8__DownstreamScheme: ws
       Routes__8__DownstreamHostAndPorts__0__Host: trip-service
       Routes__8__DownstreamHostAndPorts__0__Port: 8080
       Routes__9__UpstreamPathTemplate: /api/hubs/trips/{everything}

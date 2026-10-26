@@ -23,9 +23,9 @@ public static class MatchingEndpoints
         .WithTags("Định giá (Pricing)")
         .Produces<QuoteResponseDto>().RequireAuthorization(p => p.RequireRole("Rider"));
 
-        app.MapPost("/internal/quote", (QuoteRequestDto request, IPricingService service) =>
+        app.MapPost("/internal/quote", async (QuoteRequestDto request, IPricingService service, CancellationToken ct) =>
         {
-            var result = service.Calculate(request.ToDomain());
+            var result = await service.CalculateAsync(request.ToDomain(), ct);
             return Results.Ok(new QuoteResponseDto(result.Base, result.Distance, result.Time, result.Surge,
                 result.Toll, result.Discount, result.Tax, result.Total));
         })

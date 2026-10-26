@@ -75,7 +75,8 @@ app.MapGet("/health", () => Results.Ok(new { service = "trip-service", status = 
 
 // --- Đăng ký các Router API của TripService ---
 app.MapTripEndpoints();
-app.MapHub<SwiftRide.TripService.Api.TripNotificationHub>("/hubs/trips");
+app.MapHub<SwiftRide.TripService.Api.TripNotificationHub>("/hubs/trips",
+    options => options.CloseOnAuthenticationExpiration = true);
 
 app.UseAuthentication();
 app.UseAuthorization();

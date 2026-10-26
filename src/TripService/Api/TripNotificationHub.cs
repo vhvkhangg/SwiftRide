@@ -4,7 +4,7 @@ using SwiftRide.Security;
 
 namespace SwiftRide.TripService.Api;
 
-[Authorize]
+[Authorize(Roles = "Rider,Driver")]
 public sealed class TripNotificationHub : Hub
 {
     public override async Task OnConnectedAsync()

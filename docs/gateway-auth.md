@@ -1,5 +1,7 @@
 # Gateway và Authentication
 
+Hợp đồng HTTP/SignalR cho mobile và workflow mới: [mobile-api-contract.md](mobile-api-contract.md). Task 1 ngày 26/10/2026 đã kiểm tra transport qua Gateway thật và Auth smoke trên PostgreSQL thật; smoke nghiệp vụ còn phụ thuộc Docker Engine. Blocker build Matching đã sửa.
+
 SwiftRide dùng Ocelot trên .NET 10; Auth nằm ngay trong ApiGateway, database Auth là PostgreSQL. Gateway phát JWT HS256 và refresh token rotation. EF Core/Npgsql dùng phiên bản tập trung trong Directory.Packages.props.
 
 ## URL công khai
@@ -54,15 +56,15 @@ Revoke idempotent trả 204 và thu hồi family, không thu hồi các phiên �
 - Rider chỉ xem/hủy chuyến của mình; state machine vẫn kiểm tra trạng thái được hủy.
 - Driver chỉ xem/cập nhật chuyến đã được giao. Không được tạo chuyến thay Rider.
 - Vị trí Driver luôn dùng DriverId từ JWT; DriverId trong body bị bỏ qua.
-- Rider gọi /api/matching/match cho chuyến của mình. Matching tìm driver gần đó và tạo invitation bằng API nội bộ có authentication.
-- API danh sách lời mời /api/trips/invitations chưa triển khai, thuộc task Trip orchestration. Kiểm tra quyền nhận chuyến hiện dùng lời mời được Matching lưu qua endpoint nội bộ.
-- Driver nhận chuyến chỉ khi có invitation còn hạn (2 phút), Trip Requested và chưa có Driver. ID ở body không được dùng. PostgreSQL xmin concurrency token ngăn hai Driver nhận cùng một chuyến; loser trả 409.
-- Driver được giao dropoff sẽ chuyển chuyến sang PaymentPending trong cùng SaveChanges, không cần client gọi system transition.
+- Rider xác nhận giá qua /api/trips/{id}/confirm-price trước khi Trip gửi matching command. /api/matching/match chỉ trả ứng viên, không tạo lời mời.
+- GET /api/trips/driver/invitations chỉ trả lời mời chưa xử lý, chưa hết hạn của Driver đang đăng nhập.
+- Driver nhận/từ chối chuyến phải có invitation còn hạn, Trip PriceConfirmed và chưa có Driver. ID ở body không được dùng. PostgreSQL xmin concurrency token bảo vệ cập nhật cùng chuyến.
+- Driver dropoff nhận 202; Trip lưu PaymentPending và payment command qua transaction/outbox. Mobile chờ event hoặc poll Paid, không POST payment lần nữa.
 - Rider chỉ tạo/xem payment cho chuyến mình. Ownership được kiểm tra trước cả nhánh retry idempotency.
 - Refund/reconcile chỉ Admin. Chưa có public API cấp Admin.
 - User JWT không gọi được pay/fail/payment-pending của Trip. Các policy này yêu cầu credential nội bộ; không thể giả role bằng header.
 
-Payment hiện là mô phỏng ledger/thanh toán trong bài tập, chưa tích hợp nhà cung cấp thanh toán thật. Giá chuyến hiện vẫn theo FareEstimate trong API tạo chuyến; việc ràng buộc giá với quote được ký phía server là phần nghiệp vụ cần bổ sung trước khi sử dụng tiền thật.
+Payment hiện là mô phỏng ledger/thanh toán trong bài tập, chưa tích hợp nhà cung cấp thanh toán thật. Trip lấy giá qua Pricing nội bộ, không nhận FareEstimate làm giá từ client. Distance/time vẫn cần được xác minh phía server trước khi dùng tiền thật.
 
 ## Service-to-service
 
