@@ -12,5 +12,6 @@ public sealed record TripResponse(
     decimal? FareEstimate,
     TripStatus Status,
     DateTime CreatedAt,
-    DateTime? UpdatedAt
+    DateTime? UpdatedAt,
+    string? PaymentFailureReason
 );

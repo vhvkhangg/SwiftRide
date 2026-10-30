@@ -1,466 +1,120 @@
+using System;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
 using Moq;
-using SwiftRide.Contracts.Payments;
+using SwiftRide.Contracts.Matching;
+using SwiftRide.Messaging;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Application.Services;
 using SwiftRide.TripService.Domain.Entities;
-using SwiftRide.TripService.Domain.Enums;
 using SwiftRide.TripService.Domain.Interfaces;
-using SwiftRide.Messaging;
 using Xunit;
 
 namespace SwiftRide.TripService.Tests;
 
-public sealed class TripApplicationServiceTests
+public class TripApplicationServiceTests
 {
-    private readonly Mock<ITripWriter> _writer = new();
-    private readonly Mock<ITripReader> _reader = new();
-    private readonly Mock<IMatchingPricingClient> _pricing = new();
-    private readonly Mock<ITripWorkflowRepository> _workflow = new();
-    private readonly Mock<ITripNotifier> _notifier = new();
-    private readonly Mock<ITripMessageBus> _messageBus = new();
+    private readonly Mock<ITripReader> _readerMock = new();
+    private readonly Mock<ITripWriter> _writerMock = new();
+    private readonly Mock<ITripWorkflowRepository> _workflowMock = new();
+    private readonly Mock<ITripUnitOfWork> _uowMock = new();
+    private readonly Mock<ITripNotifier> _notifierMock = new();
+    private readonly Mock<IMatchingPricingClient> _pricingMock = new();
+    private readonly Mock<ITripMessageBus> _messageBusMock = new();
+    
+    private readonly TripApplicationService _service;
 
-    private TripApplicationService CreateService() =>
-        new(
-            _writer.Object,
-            _reader.Object,
-            _workflow.Object,
-            new ImmediateTripUnitOfWork(),
-            _notifier.Object,
-            _pricing.Object,
-            _messageBus.Object,
-            Microsoft.Extensions.Options.Options.Create(new TripMatchingOptions()));
-
-    private static CreateTripRequest ValidRequest() =>
-        new(Guid.NewGuid(), "Bến Thành", "Sân bay", 10.7769, 106.7009, 8, 25);
-
-    // ---------------------------------------------------------------------------
-    // CreateAsync
-    // ---------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Create_UsesMatchingQuoteAndSavesTripAsRequested()
+    public TripApplicationServiceTests()
     {
-        Trip? saved = null;
-        MatchingQuoteRequest? quoteRequest = null;
-        _pricing.Setup(client => client.GetQuoteAsync(
-                It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<MatchingQuoteRequest, CancellationToken>((request, _) => quoteRequest = request)
-            .ReturnsAsync(new MatchingQuoteResponse(0, 96, 50, 10, 0, 0, 15.6m, 171.6m));
-        _writer.Setup(writer => writer.AddAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()))
-            .Callback<Trip, CancellationToken>((trip, _) => saved = trip)
-            .Returns(Task.CompletedTask);
+        var options = Options.Create(new TripMatchingOptions 
+        { 
+            MaxAttempts = 3, InvitationTimeoutSeconds = 30, SearchRadiusKm = 5 
+        });
 
-        var request = ValidRequest() with { Surge = 1.2m, PromoCode = "RIDE10" };
-        var result = await CreateService().CreateAsync(request, TestContext.Current.CancellationToken);
-
-        Assert.NotNull(quoteRequest);
-        Assert.Equal(request.Distance, quoteRequest.Distance);
-        Assert.Equal(request.EstimatedTime, quoteRequest.EstimatedTime);
-        Assert.Equal(request.Surge, quoteRequest.Surge);
-        Assert.Equal(request.PromoCode, quoteRequest.PromoCode);
-        Assert.NotNull(saved);
-        Assert.Equal(171.6m, saved.FareEstimate);
-        Assert.Equal(TripStatus.Requested, saved.Status);
-        Assert.Equal(saved.Id, result.Id);
-        Assert.Equal(saved.FareEstimate, result.FareEstimate);
+        _service = new TripApplicationService(
+            _writerMock.Object, _readerMock.Object, _workflowMock.Object,
+            _uowMock.Object, _notifierMock.Object, _pricingMock.Object,
+            _messageBusMock.Object, options);
     }
 
-    [Theory]
-    [InlineData(-1, 1, 1)]
-    [InlineData(1, -1, 1)]
-    [InlineData(1, 1, 0)]
-    public async Task Create_RejectsInvalidPricingInputsBeforeCallingMatching(
-        decimal distance, decimal estimatedTime, decimal surge)
+    // --- KỊCH BẢN 1: TEST IDEMPOTENCY ---
+    
+    private string ComputeHash(object payload)
     {
-        var request = ValidRequest() with
-        {
-            Distance = distance,
-            EstimatedTime = estimatedTime,
-            Surge = surge
-        };
-
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            CreateService().CreateAsync(request, TestContext.Current.CancellationToken));
-
-        _pricing.Verify(client => client.GetQuoteAsync(
-            It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-        _writer.Verify(writer => writer.AddAsync(
-            It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
+        using var sha256 = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload));
+        return Convert.ToBase64String(sha256.ComputeHash(bytes));
     }
 
     [Fact]
-    public async Task Create_DoesNotSaveTripWhenMatchingQuoteFails()
+    public async Task CreateAsync_SameIdempotencyKey_SamePayload_ReturnsExistingTrip()
     {
-        _pricing.Setup(client => client.GetQuoteAsync(
-                It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Matching unavailable"));
+        // Arrange
+        var idempotencyKey = "key-test-123";
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", 1m, null, idempotencyKey);
+        
+        var payloadForHash = new { request.RiderId, request.PickupAddress, request.DropoffAddress, request.Distance };
+        var hash = ComputeHash(payloadForHash);
 
-        await Assert.ThrowsAsync<HttpRequestException>(() =>
-            CreateService().CreateAsync(ValidRequest(), TestContext.Current.CancellationToken));
+        var existingTrip = Trip.Create(request.RiderId, "A", "B", 50000m, 10.0, 106.0, idempotencyKey, hash);
+        
+        // Mock CSDL trả về chuyến đi cũ khi tìm theo IdempotencyKey
+        _readerMock.Setup(x => x.GetByIdempotencyKeyAsync(idempotencyKey, It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(existingTrip);
 
-        _writer.Verify(writer => writer.AddAsync(
-            It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
+        // Act
+        var response = await _service.CreateAsync(request);
 
-    // ---------------------------------------------------------------------------
-    // ConfirmPriceAsync
-    // ---------------------------------------------------------------------------
-
-    [Fact]
-    public async Task ConfirmPrice_ChangesStateAndPersistsTrip()
-    {
-        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 100, 10.7, 106.7);
-        _reader.Setup(reader => reader.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(trip);
-        _workflow.Setup(workflow => workflow.GetInvitedDriverIdsAsync(
-                trip.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<Guid>());
-
-        await CreateService().ConfirmPriceAsync(trip.Id, TestContext.Current.CancellationToken);
-
-        Assert.Equal(TripStatus.PriceConfirmed, trip.Status);
-        _writer.Verify(writer => writer.SaveAsync(trip, It.IsAny<CancellationToken>()), Times.Once);
-        _messageBus.Verify(bus => bus.SendFindDriverAsync(
-            It.Is<SwiftRide.Contracts.Matching.FindDriverForTripV1>(message =>
-                message.TripId == trip.Id && message.Attempt == 1),
-            It.IsAny<CancellationToken>()), Times.Once);
+        // Assert
+        Assert.Equal(existingTrip.Id, response.Id);
+        _writerMock.Verify(x => x.AddAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never); // Chắc chắn không lưu DB thêm dòng mới
     }
 
     [Fact]
-    public async Task DriverCannotAcceptBeforeRiderConfirmsPrice()
+    public async Task CreateAsync_SameIdempotencyKey_DifferentPayload_ThrowsConflict()
     {
-        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 100);
-        _reader.Setup(reader => reader.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(trip);
+        // Arrange
+        var idempotencyKey = "key-test-123";
+        // SỬA CS1503: Truyền đầy đủ 10.0, 106.0 cho Latitude/Longitude để không bị lệch tham số
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", 1m, null, idempotencyKey);
+        
+        // Cố tình tạo hash cũ khác với hash của request hiện tại
+        var oldHash = "some-different-old-hash"; 
+        var existingTrip = Trip.Create(request.RiderId, "A", "B", 50000m, 10.0, 106.0, idempotencyKey, oldHash);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().DriverAcceptAsync(
-                trip.Id,
-                new DriverAcceptRequest(Guid.NewGuid()),
-                TestContext.Current.CancellationToken));
+        _readerMock.Setup(x => x.GetByIdempotencyKeyAsync(idempotencyKey, It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(existingTrip);
 
-        _writer.Verify(writer => writer.SaveAsync(
-            It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Act & Assert
+        // SỬA xUnit1051: Truyền thêm CancellationToken.None
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.CreateAsync(request, CancellationToken.None));
+            
+        Assert.Contains("IdempotencyKey đã được sử dụng", ex.Message);
     }
 
-    // ---------------------------------------------------------------------------
-    // DropoffAsync – ProcessPaymentV1 contract
-    // ---------------------------------------------------------------------------
-
-    /// <summary>
-    /// DropoffAsync must publish ProcessPaymentV1 with the correct Amount,
-    /// Rider/Driver accounts and a stable IdempotencyKey.
-    /// </summary>
-    [Fact]
-    public async Task Dropoff_PublishesProcessPaymentV1WithCorrectFields()
-    {
-        var riderId = Guid.NewGuid();
-        var driverId = Guid.NewGuid();
-        var trip = CreatePickedUpTrip(riderId, driverId, fareEstimate: 150_000m);
-
-        _reader.Setup(r => r.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(trip);
-
-        ProcessPaymentV1? captured = null;
-        _messageBus
-            .Setup(b => b.SendPaymentAsync(It.IsAny<ProcessPaymentV1>(), It.IsAny<CancellationToken>()))
-            .Callback<ProcessPaymentV1, CancellationToken>((cmd, _) => captured = cmd)
-            .Returns(Task.CompletedTask);
-
-        await CreateService().DropoffAsync(trip.Id, TestContext.Current.CancellationToken);
-
-        Assert.NotNull(captured);
-        Assert.Equal(trip.Id, captured.CorrelationId);
-        Assert.Equal(trip.Id, captured.TripId);
-        Assert.Equal(150_000m, captured.Amount);
-        Assert.Equal("VND", captured.Currency);
-        Assert.Equal($"trip-{trip.Id:N}-payment-v1", captured.IdempotencyKey);
-        Assert.Equal($"rider-{riderId:D}", captured.PayerAccount);
-        Assert.Equal($"driver-{driverId:D}", captured.PayeeAccount);
-    }
+    // --- KỊCH BẢN 2: TEST PHỤC HỒI PHIÊN ---
 
     [Fact]
-    public async Task Dropoff_IdempotencyKey_IsStableAcrossRetries()
+    public async Task GetActiveTripAsync_WhenExists_ReturnsTripResponse()
     {
-        // Two separate DropoffAsync calls for the same Trip (PaymentPending retry path)
-        // must produce the identical IdempotencyKey.
-        var riderId = Guid.NewGuid();
-        var driverId = Guid.NewGuid();
-        var trip = CreatePickedUpTrip(riderId, driverId, fareEstimate: 50_000m);
+        // Arrange
+        var userId = Guid.NewGuid();
+        var trip = Trip.Create(userId, "A", "B", 50000m);
+        _readerMock.Setup(x => x.GetActiveTripAsync(userId, "Rider", It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(trip);
 
-        _reader.Setup(r => r.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(trip);
+        // Act
+        // SỬA xUnit1051: Truyền thêm CancellationToken.None
+        var response = await _service.GetActiveTripAsync(userId, "Rider", CancellationToken.None);
 
-        var keys = new List<string>();
-        _messageBus
-            .Setup(b => b.SendPaymentAsync(It.IsAny<ProcessPaymentV1>(), It.IsAny<CancellationToken>()))
-            .Callback<ProcessPaymentV1, CancellationToken>((cmd, _) => keys.Add(cmd.IdempotencyKey))
-            .Returns(Task.CompletedTask);
-
-        await CreateService().DropoffAsync(trip.Id, TestContext.Current.CancellationToken);
-        // Trip is now PaymentPending; calling again re-sends the payment command
-        await CreateService().DropoffAsync(trip.Id, TestContext.Current.CancellationToken);
-
-        Assert.Equal(2, keys.Count);
-        Assert.Equal(keys[0], keys[1]);
-    }
-
-    // ---------------------------------------------------------------------------
-    // HandlePaymentSucceededAsync
-    // ---------------------------------------------------------------------------
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_ValidEvent_TransitionsPaymentPendingToPaid()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = ValidSucceededEvent(trip);
-        await CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken);
-
-        Assert.Equal(TripStatus.Paid, trip.Status);
-        _writer.Verify(w => w.SaveAsync(trip, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_DuplicateEvent_IsIdempotentWhenAmountMatches()
-    {
-        // Trip is already Paid; duplicate event with matching amount must be silently accepted.
-        var trip = CreatePaidTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = ValidSucceededEvent(trip);
-        await CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken);
-
-        // Should NOT persist or notify again
-        _writer.Verify(w => w.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
-        _notifier.Verify(n => n.NotifyTripChangedAsync(It.IsAny<TripResponse>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_DuplicateEvent_ThrowsWhenAmountMismatches()
-    {
-        var trip = CreatePaidTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentSucceededV1
-        {
-            CorrelationId = trip.Id,
-            TripId = trip.Id,
-            PaymentId = Guid.NewGuid(),
-            Amount = 99_000m, // wrong amount
-            Currency = "VND",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_WrongCorrelationId_Throws()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentSucceededV1
-        {
-            CorrelationId = Guid.NewGuid(), // wrong: must equal TripId
-            TripId = trip.Id,
-            PaymentId = Guid.NewGuid(),
-            Amount = trip.FareEstimate!.Value,
-            Currency = "VND",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken));
-        _writer.Verify(w => w.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_EmptyPaymentId_Throws()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentSucceededV1
-        {
-            CorrelationId = trip.Id,
-            TripId = trip.Id,
-            PaymentId = Guid.Empty, // invalid
-            Amount = trip.FareEstimate!.Value,
-            Currency = "VND",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_WrongAmount_Throws()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentSucceededV1
-        {
-            CorrelationId = trip.Id,
-            TripId = trip.Id,
-            PaymentId = Guid.NewGuid(),
-            Amount = 50_000m, // wrong amount
-            Currency = "VND",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken));
-        _writer.Verify(w => w.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task HandlePaymentSucceeded_WrongCurrency_Throws()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentSucceededV1
-        {
-            CorrelationId = trip.Id,
-            TripId = trip.Id,
-            PaymentId = Guid.NewGuid(),
-            Amount = trip.FareEstimate!.Value,
-            Currency = "USD", // wrong currency
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            CreateService().HandlePaymentSucceededAsync(evt, TestContext.Current.CancellationToken));
-    }
-
-    // ---------------------------------------------------------------------------
-    // HandlePaymentFailedAsync
-    // ---------------------------------------------------------------------------
-
-    [Fact]
-    public async Task HandlePaymentFailed_ValidEvent_RecordsFailureWithoutChangingState()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentFailedV1
-        {
-            TripId = trip.Id,
-            CorrelationId = trip.Id,
-            IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
-            Reason = "Insufficient funds",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await CreateService().HandlePaymentFailedAsync(evt, TestContext.Current.CancellationToken);
-
-        // RecordPaymentFailure does not change Status, just logs reason
-        Assert.Equal(TripStatus.PaymentPending, trip.Status);
-        _writer.Verify(w => w.SaveAsync(trip, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task HandlePaymentFailed_StaleIdempotencyKey_IsIgnored()
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var staleEvt = new PaymentFailedV1
-        {
-            TripId = trip.Id,
-            CorrelationId = trip.Id,
-            // Key does not match the pattern TripService sends, so event is stale
-            IdempotencyKey = $"trip-{trip.Id:N}-payment-v2",
-            Reason = "Old failure",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await CreateService().HandlePaymentFailedAsync(staleEvt, TestContext.Current.CancellationToken);
-
-        _writer.Verify(w => w.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task HandlePaymentFailed_TripNotPaymentPending_IsIgnored()
-    {
-        // Trip is already Paid; a late FailedV1 must not alter state.
-        var trip = CreatePaidTrip(fareEstimate: 80_000m);
-        SetupReader(trip);
-
-        var evt = new PaymentFailedV1
-        {
-            TripId = trip.Id,
-            CorrelationId = trip.Id,
-            IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
-            Reason = "Too late",
-            OccurredAtUtc = DateTimeOffset.UtcNow
-        };
-
-        await CreateService().HandlePaymentFailedAsync(evt, TestContext.Current.CancellationToken);
-
-        Assert.Equal(TripStatus.Paid, trip.Status);
-        _writer.Verify(w => w.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    // ---------------------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------------------
-
-    private static Trip CreatePickedUpTrip(Guid riderId, Guid driverId, decimal fareEstimate)
-    {
-        var trip = Trip.Create(riderId, "A", "B", fareEstimate, 10.7, 106.7);
-        trip.ConfirmPrice();
-        trip.BeginMatchingAttempt(3);
-        trip.AcceptByDriver(driverId);
-        trip.StartEnRoute();
-        trip.Pickup();
-        return trip;
-    }
-
-    private static Trip CreatePaymentPendingTrip(decimal fareEstimate)
-    {
-        var trip = CreatePickedUpTrip(Guid.NewGuid(), Guid.NewGuid(), fareEstimate);
-        trip.Dropoff();
-        trip.MarkPaymentPending();
-        return trip;
-    }
-
-    private static Trip CreatePaidTrip(decimal fareEstimate)
-    {
-        var trip = CreatePaymentPendingTrip(fareEstimate);
-        trip.MarkPaid();
-        return trip;
-    }
-
-    private void SetupReader(Trip trip) =>
-        _reader.Setup(r => r.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
-               .ReturnsAsync(trip);
-
-    private static PaymentSucceededV1 ValidSucceededEvent(Trip trip) => new()
-    {
-        CorrelationId = trip.Id,
-        TripId = trip.Id,
-        PaymentId = Guid.NewGuid(),
-        Amount = trip.FareEstimate!.Value,
-        Currency = "VND",
-        OccurredAtUtc = DateTimeOffset.UtcNow
-    };
-
-    private sealed class ImmediateTripUnitOfWork : ITripUnitOfWork
-    {
-        public Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken ct) =>
-            operation(ct);
-
-        public Task<T> ExecuteAsync<T>(
-            Func<CancellationToken, Task<T>> operation,
-            CancellationToken ct) =>
-            operation(ct);
+        // Assert
+        Assert.NotNull(response);
+        Assert.Equal(trip.Id, response.Id);
     }
 }

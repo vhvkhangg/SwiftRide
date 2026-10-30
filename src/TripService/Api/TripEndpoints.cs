@@ -15,18 +15,33 @@ public static class TripEndpoints
         var group = app.MapGroup("/trips").WithTags("Trips")
             .RequireAuthorization().AddEndpointFilter<TripAccessFilter>();
 
+        group.MapGet("/active", async (HttpContext context, ITripApplicationService service, CancellationToken ct) =>
+        {
+            var userId = context.User.UserId();
+            var role = context.User.IsInRole("Driver") ? "Driver" : "Rider";
+            var trip = await service.GetActiveTripAsync(userId, role, ct);
+
+            return trip is null ? Results.NotFound() : Results.Ok(trip);
+        });
+
         // API Đặt xe (POST /trips)
         group.MapPost("/", async (CreateTripRequest request, HttpContext context, ITripApplicationService service,
-            ILogger<TripApplicationService> logger, CancellationToken ct) =>
+        ILogger<TripApplicationService> logger, CancellationToken ct) =>
         {
             try
             {
                 var response = await service.CreateAsync(request with { RiderId = context.User.UserId() }, ct);
+                // Trả về 201 Created (Kể cả khi đó là chuyến cũ phục hồi qua Idempotency, Client vẫn xử lý như thành công)
                 return Results.Created($"/trips/{response.Id}", response);
             }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("IdempotencyKey"))
+            {
+                // Trả về HTTP 409 (Conflict) khi trùng key khác payload
+                return Results.Conflict(new { error = ex.Message });
             }
             catch (HttpRequestException ex)
             {

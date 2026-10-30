@@ -18,28 +18,36 @@ public sealed class DriverInvitationTimeoutWorker(
 
     private async Task ProcessExpiredInvitationsAsync(CancellationToken ct)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var repository = scope.ServiceProvider.GetRequiredService<ITripWorkflowRepository>();
-        var trips = scope.ServiceProvider.GetRequiredService<ITripApplicationService>();
-        var expired = await repository.GetExpiredInvitationsAsync(DateTime.UtcNow, 50, ct);
-
-        foreach (var invitation in expired)
+        try
         {
-            try
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var repository = scope.ServiceProvider.GetRequiredService<ITripWorkflowRepository>();
+            var trips = scope.ServiceProvider.GetRequiredService<ITripApplicationService>();
+            
+            // Nếu rớt kết nối DB, lỗi sẽ xảy ra ở đây.
+            var expired = await repository.GetExpiredInvitationsAsync(DateTime.UtcNow, 50, ct);
+
+            foreach (var invitation in expired)
             {
-                await trips.HandleInvitationTimeoutAsync(
-                    invitation.TripId, invitation.DriverId, invitation.Attempt, ct);
+                try
+                {
+                    await trips.HandleInvitationTimeoutAsync(
+                        invitation.TripId, invitation.DriverId, invitation.Attempt, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex,
+                        "Không xử lý được lời mời hết hạn cho Trip {TripId}, Driver {DriverId}, Attempt {Attempt}",
+                        invitation.TripId, invitation.DriverId, invitation.Attempt);
+                }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex,
-                    "Không xử lý được lời mời hết hạn cho Trip {TripId}, Driver {DriverId}, Attempt {Attempt}",
-                    invitation.TripId, invitation.DriverId, invitation.Attempt);
-            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            // Bắt lỗi toàn cục của vòng lặp để bảo vệ Worker không bị chết vì lỗi DB tạm thời
+            logger.LogWarning(ex, "Lỗi kết nối DB tạm thời khi quét timeout. Sẽ thử lại ở chu kỳ (tick) tiếp theo.");
         }
     }
 }

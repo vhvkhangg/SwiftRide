@@ -21,6 +21,9 @@ public sealed class Trip
     public DateTime CreatedAt { get; private set; }
     public DateTime? UpdatedAt { get; private set; }
 
+    public string? IdempotencyKey { get; private set; }
+    public string? PayloadHash { get; private set; }
+
     // Biến lưu trạng thái  
     [NotMapped]
     private TripState _state = null!;
@@ -28,12 +31,14 @@ public sealed class Trip
     private Trip() { }
 
     public static Trip Create(
-        Guid riderId,
-        string pickup,
-        string dropoff,
-        decimal? fare,
-        double? pickupLatitude = null,
-        double? pickupLongitude = null)
+    Guid riderId,
+    string pickup,
+    string dropoff,
+    decimal? fare,
+    double? pickupLatitude = null,
+    double? pickupLongitude = null,
+    string? idempotencyKey = null,
+    string? payloadHash = null)
     {
         var trip = new Trip
         {
@@ -45,11 +50,12 @@ public sealed class Trip
             PickupLongitude = pickupLongitude,
             FareEstimate = fare,
             CreatedAt = DateTime.UtcNow,
-            Status = TripStatus.Requested
+            Status = TripStatus.Requested,
+            IdempotencyKey = idempotencyKey,
+            PayloadHash = payloadHash
         };
 
         trip._state = new RequestedState();
-
         return trip;
     }
 
@@ -99,7 +105,7 @@ public sealed class Trip
     public void AcceptByDriver(Guid driverId)
     {
         if (_state == null) throw new InvalidOperationException("State is not initialized. Call RehydrateState first.");
-        
+
         _state = _state.AcceptByDriver(driverId);
         DriverId = driverId;
         Status = _state.Status;

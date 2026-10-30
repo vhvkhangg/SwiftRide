@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Payments;
@@ -47,6 +50,23 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task<TripResponse> CreateAsync(CreateTripRequest request, CancellationToken ct = default)
     {
+        // 1. Kiểm tra Idempotency nếu có
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            var existingTrip = await _reader.GetByIdempotencyKeyAsync(request.IdempotencyKey, ct);
+            if (existingTrip is not null)
+            {
+                var currentPayloadHash = GeneratePayloadHash(request);
+                if (existingTrip.PayloadHash == currentPayloadHash)
+                {
+                    // Cùng key + cùng payload -> Trả về chuyến cũ
+                    return ToResponse(existingTrip);
+                }
+                // Cùng key + khác payload -> Từ chối (Lỗi 409 Conflict)
+                throw new InvalidOperationException("IdempotencyKey đã được sử dụng với payload khác.");
+            }
+        }
+
         if (request.RiderId == Guid.Empty ||
             string.IsNullOrWhiteSpace(request.PickupAddress) ||
             string.IsNullOrWhiteSpace(request.DropoffAddress) ||
@@ -63,26 +83,46 @@ public sealed class TripApplicationService : ITripApplicationService
             request.PickupLongitude.Value < -180 || request.PickupLongitude.Value > 180)
             throw new ArgumentException("Cần tọa độ điểm đón hợp lệ.");
 
+        // Lấy báo giá
         var quote = await _matchingPricing.GetQuoteAsync(
-            new MatchingQuoteRequest(
-                request.Distance,
-                request.EstimatedTime,
-                request.RideType,
-                request.Surge,
-                request.PromoCode),
-            ct);
+        new MatchingQuoteRequest(
+            request.Distance,
+            request.EstimatedTime,
+            request.RideType,
+            request.Surge,
+            request.PromoCode),
+        ct);
 
+        // 3. Tạo chuyến mới kèm Hash
         var trip = Trip.Create(
             request.RiderId,
             request.PickupAddress,
             request.DropoffAddress,
             quote.Total,
             request.PickupLatitude,
-            request.PickupLongitude);
+            request.PickupLongitude,
+            request.IdempotencyKey,
+            GeneratePayloadHash(request)); // Băm DTO
+
         await _writer.AddAsync(trip, ct);
         return ToResponse(trip);
     }
 
+    public async Task<TripResponse?> GetActiveTripAsync(Guid userId, string role, CancellationToken ct = default)
+    {
+        var trip = await _reader.GetActiveTripAsync(userId, role, ct);
+        return trip is null ? null : ToResponse(trip);
+    }
+
+    // Hàm hỗ trợ băm Payload
+    private static string GeneratePayloadHash(CreateTripRequest request)
+    {
+        // Loại bỏ các trường không cấu thành sự khác biệt về payload nghiệp vụ (như IdempotencyKey)
+        var payloadForHash = new { request.RiderId, request.PickupAddress, request.DropoffAddress, request.Distance };
+        using var sha256 = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payloadForHash));
+        return Convert.ToBase64String(sha256.ComputeHash(bytes));
+    }
     public async Task<TripResponse> GetByIdAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await GetTripAsync(tripId, ct);
@@ -159,14 +199,26 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task DriverAcceptAsync(Guid tripId, DriverAcceptRequest request, CancellationToken ct = default)
     {
-        var trip = await GetTripAsync(tripId, ct);
-        var invitation = await _workflow.GetActiveInvitationAsync(
-            tripId, request.DriverId, DateTime.UtcNow, ct);
-        if (invitation is null || invitation.Attempt != trip.MatchingAttempt)
-            throw new InvalidOperationException("Tài xế không có lời mời còn hiệu lực cho chuyến này.");
+        var response = await _unitOfWork.ExecuteAsync(async transactionCt =>
+        {
+            var trip = await GetTripAsync(tripId, transactionCt);
+            var invitation = await _workflow.GetActiveInvitationAsync(
+                tripId, request.DriverId, DateTime.UtcNow, transactionCt);
 
-        trip.AcceptByDriver(request.DriverId);
-        await SaveAndNotifyAsync(trip, ct);
+            if (invitation is null || invitation.Attempt != trip.MatchingAttempt)
+                throw new InvalidOperationException("Tài xế không có lời mời còn hiệu lực cho chuyến này.");
+
+            trip.AcceptByDriver(request.DriverId);
+            await _writer.SaveAsync(trip, transactionCt);
+
+            // Bắt buộc: Đánh dấu lời mời đã được giải quyết để Timeout Worker không quét lại và gây lỗi đồng thời
+            await _workflow.ResolveInvitationAsync(
+                tripId, request.DriverId, trip.MatchingAttempt, DateTime.UtcNow, false, transactionCt);
+
+            return ToResponse(trip);
+        }, ct);
+
+        await _notifier.NotifyTripChangedAsync(response, ct);
     }
 
     public Task DriverRejectAsync(Guid tripId, Guid driverId, CancellationToken ct = default) =>
@@ -213,6 +265,9 @@ public sealed class TripApplicationService : ITripApplicationService
             if (!resolved)
                 return null;
 
+            // Phối hợp Task 3: Tài xế từ chối (Reject) hoặc hết giờ (Timeout) -> Giải phóng tài xế này
+            await _messageBus.ReleaseDriverAsync(driverId, tripId, transactionCt);
+
             if (trip.MatchingAttempt >= _options.MaxAttempts)
             {
                 trip.MarkFailed();
@@ -229,7 +284,7 @@ public sealed class TripApplicationService : ITripApplicationService
         if (response is not null)
             await _notifier.NotifyTripChangedAsync(response, ct);
     }
-
+    
     public async Task StartEnRouteAsync(Guid tripId, CancellationToken ct = default)
     {
         var trip = await GetTripAsync(tripId, ct);
@@ -292,9 +347,22 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task CancelAsync(Guid tripId, CancellationToken ct = default)
     {
-        var trip = await GetTripAsync(tripId, ct);
-        trip.Cancel();
-        await SaveAndNotifyAsync(trip, ct);
+        var response = await _unitOfWork.ExecuteAsync(async transactionCt =>
+        {
+            var trip = await GetTripAsync(tripId, transactionCt);
+            trip.Cancel();
+            await _writer.SaveAsync(trip, transactionCt);
+
+            // Nếu chuyến bị hủy mà đã có tài xế nhận, phải giải phóng họ
+            if (trip.DriverId.HasValue)
+            {
+                await _messageBus.ReleaseDriverAsync(trip.DriverId.Value, trip.Id, transactionCt);
+            }
+
+            return ToResponse(trip);
+        }, ct);
+
+        await _notifier.NotifyTripChangedAsync(response, ct);
     }
 
     public async Task MarkPaymentPendingAsync(Guid tripId, CancellationToken ct = default)
@@ -355,20 +423,44 @@ public sealed class TripApplicationService : ITripApplicationService
 
     public async Task HandlePaymentFailedAsync(PaymentFailedV1 result, CancellationToken ct = default)
     {
-        if (result.TripId == Guid.Empty) return;
-
-        // Guard against stale events from a different payment attempt:
-        // the idempotency key must match the one TripService would have sent.
-        var expectedKeyPrefix = $"trip-{result.TripId:N}-payment-v1";
-        if (!string.IsNullOrWhiteSpace(result.IdempotencyKey) &&
-            !string.Equals(result.IdempotencyKey, expectedKeyPrefix, StringComparison.Ordinal))
-            return;
+        // Khối Validation & Anti-Corruption
+        if (result.TripId == Guid.Empty ||
+            result.CorrelationId != result.TripId ||
+            result.PaymentId == Guid.Empty ||
+            result.Amount <= 0 ||
+            result.Currency != "VND" ||
+            result.FailureCode != "PAYMENT_DECLINED" ||
+            string.IsNullOrWhiteSpace(result.Reason) ||
+            result.IdempotencyKey != $"trip-{result.TripId:N}-payment-v1")
+        {
+            throw new InvalidOperationException("PaymentFailedV1 không hợp lệ.");
+        }
 
         var trip = await GetTripAsync(result.TripId, ct);
+
+        // Đối chiếu tài chính
+        if (trip.FareEstimate != result.Amount)
+        {
+            throw new InvalidOperationException("Số tiền PaymentFailedV1 không khớp FareEstimate của Trip.");
+        }
+
+        // Xử lý Event đến muộn khi chuyến đã Paid
+        if (trip.Status == TripStatus.Paid)
+        {
+            // Trả về ngay lập tức để RabbitMQ Ack (xóa message), tránh ném lỗi khiến Broker retry.
+            return;
+        }
+
+        // Đảm bảo chỉ xử lý khi chuyến đang chờ thanh toán
         if (trip.Status != TripStatus.PaymentPending) return;
 
-        trip.RecordPaymentFailure(result.Reason);
-        await SaveAndNotifyAsync(trip, ct);
+        // Chống ghi lặp Reason và thay đổi trạng thái
+        if (string.IsNullOrWhiteSpace(trip.PaymentFailureReason))
+        {
+            trip.RecordPaymentFailure(result.Reason);
+            trip.MarkFailed();
+            await SaveAndNotifyAsync(trip, ct);
+        }
     }
 
     private async Task SendFindDriverAsync(Trip trip, int attempt, CancellationToken ct)
@@ -417,7 +509,8 @@ public sealed class TripApplicationService : ITripApplicationService
             trip.FareEstimate,
             trip.Status,
             trip.CreatedAt,
-            trip.UpdatedAt);
+            trip.UpdatedAt,
+            trip.PaymentFailureReason);
 }
 
 public sealed class TripMessagePublishException(Guid tripId, string message, Exception innerException)
