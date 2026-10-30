@@ -46,4 +46,8 @@ public class MessagePublisher : ITripMessageBus
         await endpoint.Send(message, cancellationToken);
     }
 
+    public async Task ReleaseDriverAsync(Guid driverId, Guid tripId, CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask;
+    }
 }

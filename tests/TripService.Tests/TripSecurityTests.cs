@@ -48,7 +48,7 @@ public sealed class TripSecurityTests
             {
                 received = request;
                 return new TripResponse(Guid.NewGuid(), request.RiderId, null, request.PickupAddress,
-                    request.DropoffAddress, 100, TripStatus.Requested, DateTime.UtcNow, null);
+                    request.DropoffAddress, 100, TripStatus.Requested, DateTime.UtcNow, null, null);
             });
         trips.Setup(service => service.MarkPaidAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
