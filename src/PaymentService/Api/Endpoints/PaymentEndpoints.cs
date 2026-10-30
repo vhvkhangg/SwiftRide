@@ -12,7 +12,6 @@ public static class PaymentEndpoints
         this IEndpointRouteBuilder endpoints, bool enableDevelopmentReconciliation = false)
     {
         var group = endpoints.MapGroup("/payments").RequireAuthorization().AddEndpointFilter<PaymentAccessFilter>();
-        group.MapPost("/", CreatePaymentAsync).RequireAuthorization(p => p.RequireRole("Rider"));
         group.MapGet("/{id:guid}", GetPaymentAsync);
         group.MapGet("/trip/{tripId:guid}", GetPaymentByTripAsync);
         group.MapPost("/{id:guid}/refund", RefundPaymentAsync).RequireAuthorization(p => p.RequireRole("Admin"));

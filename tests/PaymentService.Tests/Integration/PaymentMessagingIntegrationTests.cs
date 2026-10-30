@@ -62,7 +62,8 @@ public sealed class PaymentMessagingIntegrationTests
 
     private static PaymentApplicationService CreateService(
         PaymentDbContext db,
-        CreatePaymentRequest request)
+        CreatePaymentRequest request,
+        IPaymentDecisionService? decision = null)
     {
         var riderId = Guid.ParseExact(request.PayerAccount["rider-".Length..], "D");
         var driverId = Guid.ParseExact(request.PayeeAccount["driver-".Length..], "D");
@@ -79,9 +80,9 @@ public sealed class PaymentMessagingIntegrationTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(trip);
 
-        return new PaymentApplicationService(
-            new PaymentRepository(db),
-            tripClient.Object);
+        return decision is null
+            ? new PaymentApplicationService(new PaymentRepository(db), tripClient.Object)
+            : new PaymentApplicationService(new PaymentRepository(db), tripClient.Object, decision);
     }
 
     [Fact]
@@ -183,5 +184,92 @@ public sealed class PaymentMessagingIntegrationTests
 
         Assert.Equal(0, await verify.LedgerEntries.CountAsync(
             x => x.PaymentId == paymentId, ct));
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DeclinedPayment_ShouldPersistWithoutLedgerAndReuseOriginalFailure()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var options = await CreateOptionsAsync(ct);
+        var request = NewRequest();
+        var decision = new Mock<IPaymentDecisionService>(MockBehavior.Strict);
+        decision.Setup(x => x.DecideAsync(
+                It.IsAny<TripSnapshot>(),
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentDecision(
+                false, "PAYMENT_DECLINED", "Thanh toán bị từ chối."));
+
+        Guid paymentId;
+        await using (var db = new PaymentDbContext(options))
+        {
+            var response = await CreateService(db, request, decision.Object)
+                .ProcessPaymentCommandAsync(request, ct);
+            Assert.Equal("Failed", response.Status);
+            Assert.Equal("PAYMENT_DECLINED", response.FailureCode);
+            paymentId = response.Id;
+        }
+
+        await using (var db = new PaymentDbContext(options))
+        {
+            var retry = await CreateService(db, request, decision.Object)
+                .ProcessPaymentCommandAsync(request, ct);
+            Assert.Equal(paymentId, retry.Id);
+            Assert.Equal("Failed", retry.Status);
+            Assert.Equal("Thanh toán bị từ chối.", retry.FailureReason);
+        }
+
+        await using var verify = new PaymentDbContext(options);
+        var payment = await verify.Payments.AsNoTracking().SingleAsync(
+            x => x.IdempotencyKey == request.IdempotencyKey, ct);
+        Assert.Equal(paymentId, payment.Id);
+        Assert.Equal("PAYMENT_DECLINED", payment.FailureCode);
+        Assert.Equal(0, await verify.LedgerEntries.CountAsync(
+            x => x.PaymentId == paymentId, ct));
+        decision.Verify(x => x.DecideAsync(
+            It.IsAny<TripSnapshot>(),
+            It.IsAny<CreatePaymentRequest>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DeclinedPayment_SameKeyDifferentPayload_ShouldNotCreateSecondPayment()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var options = await CreateOptionsAsync(ct);
+        var request = NewRequest();
+        var decision = new Mock<IPaymentDecisionService>();
+        decision.Setup(x => x.DecideAsync(
+                It.IsAny<TripSnapshot>(),
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentDecision(
+                false, "PAYMENT_DECLINED", "Thanh toán bị từ chối."));
+
+        await using (var db = new PaymentDbContext(options))
+        {
+            await CreateService(db, request, decision.Object)
+                .ProcessPaymentCommandAsync(request, ct);
+        }
+
+        var changed = request with { Amount = request.Amount + 1m };
+        await using (var db = new PaymentDbContext(options))
+        {
+            await Assert.ThrowsAsync<PaymentCommandRejectedException>(() =>
+                CreateService(db, request, decision.Object)
+                    .ProcessPaymentCommandAsync(changed, ct));
+        }
+
+        await using var verify = new PaymentDbContext(options);
+        Assert.Equal(1, await verify.Payments.CountAsync(
+            x => x.TripId == request.TripId, ct));
+        var persistedId = await verify.Payments
+            .Where(p => p.TripId == request.TripId)
+            .Select(p => p.Id)
+            .SingleAsync(ct);
+        Assert.Equal(0, await verify.LedgerEntries.CountAsync(
+            x => x.PaymentId == persistedId, ct));
     }
 }

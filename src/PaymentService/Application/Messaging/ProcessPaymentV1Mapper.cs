@@ -23,6 +23,18 @@ public static class ProcessPaymentV1Mapper
                 nameof(message));
         }
 
+        var expectedKey = $"trip-{message.TripId:N}-payment-v1";
+
+        if (!string.Equals(
+            message.IdempotencyKey,
+            expectedKey,
+            StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "IdempotencyKey không khớp quy tắc của TripService.",
+                nameof(message));
+        }
+
         if (!string.Equals(message.Currency, "VND", StringComparison.Ordinal))
         {
             throw new ArgumentException(

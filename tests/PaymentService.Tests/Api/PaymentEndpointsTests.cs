@@ -1,9 +1,13 @@
 using System.Reflection;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Http;
 using Moq;
 using SwiftRide.PaymentService.Api.Endpoints;
 using SwiftRide.PaymentService.Application.Services;
 using Xunit;
+using Microsoft.Extensions.DependencyInjection;
+using SwiftRide.PaymentService.Application.Integrations;
 
 namespace SwiftRide.PaymentService.Tests.Api;
 
@@ -31,4 +35,38 @@ public sealed class PaymentEndpointsTests
 
         Assert.Equal(StatusCodes.Status400BadRequest, status.StatusCode);
     }
+
+
+    [Fact]
+    public async Task PaymentRoutes_ShouldNotExposeDirectCreationEndpoint()
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.Services.AddAuthorization();
+
+        builder.Services.AddSingleton<IPaymentApplicationService>(
+            Mock.Of<IPaymentApplicationService>());
+
+        builder.Services.AddSingleton<ITripServiceClient>(
+            Mock.Of<ITripServiceClient>());
+
+        await using var app = builder.Build();
+
+        app.MapPaymentEndpoints();
+
+        var routes = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .ToArray();
+
+        Assert.Contains(routes, route =>
+            route.RoutePattern.RawText?.TrimEnd('/') ==
+            "/payments/{id:guid}/refund");
+
+        Assert.DoesNotContain(routes, route =>
+            route.RoutePattern.RawText?.TrimEnd('/') == "/payments" &&
+            route.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+                .Contains("POST") == true);
+    }
+
 }

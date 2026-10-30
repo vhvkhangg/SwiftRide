@@ -50,13 +50,6 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
             throw;
         }
 
-        if (payment.Status != nameof(PaymentStatus.Succeeded))
-        {
-            throw new PaymentCommandRejectedException(
-                $"Không thể phát PaymentSucceededV1 " +
-                $"cho Payment có trạng thái '{payment.Status}'.");
-        }
-
         if (payment.Id == Guid.Empty ||
             payment.TripId != request.TripId ||
             payment.Amount != request.Amount ||
@@ -67,6 +60,43 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
         {
             throw new InvalidOperationException(
                 "Kết quả xử lý Payment không khớp command đầu vào.");
+        }
+
+        if (payment.Status == nameof(PaymentStatus.Failed))
+        {
+            if (payment.FailureCode != "PAYMENT_DECLINED" ||
+                string.IsNullOrWhiteSpace(payment.FailureReason))
+            {
+                throw new InvalidOperationException(
+                    "Payment Failed thiếu thông tin thất bại hợp lệ.");
+            }
+
+            await context.Publish(new PaymentFailedV1
+            {
+                CorrelationId = context.Message.CorrelationId,
+                TripId = payment.TripId,
+                PaymentId = payment.Id,
+                IdempotencyKey = payment.IdempotencyKey,
+                Amount = payment.Amount,
+                Currency = "VND",
+                FailureCode = payment.FailureCode,
+                Reason = payment.FailureReason,
+                OccurredAtUtc = DateTimeOffset.UtcNow
+            },
+            context.CancellationToken);
+
+            _logger.LogInformation(
+                "Payment failure event staged. PaymentId={PaymentId}, TripId={TripId}",
+                payment.Id,
+                payment.TripId);
+
+            return;
+        }
+
+        if (payment.Status != nameof(PaymentStatus.Succeeded))
+        {
+            throw new PaymentCommandRejectedException(
+                $"Payment có trạng thái không hợp lệ: '{payment.Status}'.");
         }
 
         await context.Publish(

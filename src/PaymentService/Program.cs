@@ -61,9 +61,11 @@ builder.Services.AddScoped<
     IPaymentApplicationService,
     PaymentApplicationService>();
 
+builder.Services.AddScoped<
+    IPaymentDecisionService,
+    ApprovePaymentDecisionService>();
+
 builder.Services.AddServiceSecurity(builder.Configuration);
-
-
 
 builder.Services.AddTransient<InternalTripHandler>();
 builder.Services.AddHttpClient<

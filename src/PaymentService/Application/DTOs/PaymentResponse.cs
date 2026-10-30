@@ -10,9 +10,13 @@ public sealed record PaymentResponse(
     string IdempotencyKey,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    bool IsTripSynced)
+    bool IsTripSynced,
+    string? FailureCode = null,
+    string? FailureReason = null
+)
 {
     public static PaymentResponse From(Payment p) => new(
         p.Id, p.TripId, p.Amount, p.Status.ToString(), p.IdempotencyKey,
-        p.CreatedAt, p.UpdatedAt, p.IsTripSynced);
+        p.CreatedAt, p.UpdatedAt, p.IsTripSynced,
+        p.FailureCode, p.FailureReason);
 }

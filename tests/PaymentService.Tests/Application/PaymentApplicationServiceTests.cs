@@ -890,4 +890,174 @@ public sealed class PaymentApplicationServiceTests
 
         await AssertCommandRejectedBeforePersistingAsync(request);
     }
+
+    [Fact]
+    public async Task ProcessCommand_DecisionDeclined_ShouldPersistFailedWithoutLedger()
+    {
+        var (request, snapshot) = NewRequest();
+        var decision = new Mock<IPaymentDecisionService>(MockBehavior.Strict);
+        decision.Setup(x => x.DecideAsync(
+                snapshot,
+                request,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentDecision(
+                false,
+                "PAYMENT_DECLINED",
+                "Thanh toán bị từ chối."));
+
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
+
+        Payment? persisted = null;
+        _repo.Setup(x => x.AddAsync(
+                It.IsAny<Payment>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Payment, CancellationToken>((payment, _) => persisted = payment)
+            .Returns(Task.CompletedTask);
+
+        var service = new PaymentApplicationService(
+            _repo.Object, _trip.Object, decision.Object);
+
+        var response = await service.ProcessPaymentCommandAsync(
+            request, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Failed", response.Status);
+        Assert.Equal("PAYMENT_DECLINED", response.FailureCode);
+        Assert.Equal("Thanh toán bị từ chối.", response.FailureReason);
+        Assert.NotNull(persisted);
+        Assert.Equal(PaymentStatus.Failed, persisted.Status);
+        Assert.Equal(persisted.Id, response.Id);
+        Assert.False(persisted.IsTripSynced);
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Once);
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.IsAny<IEnumerable<LedgerEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        decision.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_ExistingFailed_ShouldReturnOriginalFailureWithoutWrites()
+    {
+        var (request, _) = NewRequest();
+        var existing = Payment.Create(
+            request.TripId, request.Amount, request.IdempotencyKey,
+            request.PayerAccount, request.PayeeAccount);
+        existing.MarkFailed("PAYMENT_DECLINED", "Tài khoản không đủ số dư.");
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        var decision = new Mock<IPaymentDecisionService>(MockBehavior.Strict);
+        var service = new PaymentApplicationService(
+            _repo.Object, _trip.Object, decision.Object);
+
+        var first = await service.ProcessPaymentCommandAsync(
+            request, TestContext.Current.CancellationToken);
+        var second = await service.ProcessPaymentCommandAsync(
+            request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(existing.Id, first.Id);
+        Assert.Equal(existing.Id, second.Id);
+        Assert.Equal("Failed", first.Status);
+        Assert.Equal(first.FailureCode, second.FailureCode);
+        Assert.Equal("PAYMENT_DECLINED", second.FailureCode);
+        Assert.Equal("Tài khoản không đủ số dư.", second.FailureReason);
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.IsAny<IEnumerable<LedgerEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+        _trip.VerifyNoOtherCalls();
+        decision.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_ExistingFailedDifferentPayload_ShouldReject()
+    {
+        var (request, _) = NewRequest();
+        var existing = Payment.Create(
+            request.TripId, request.Amount, request.IdempotencyKey,
+            request.PayerAccount, request.PayeeAccount);
+        existing.MarkFailed("PAYMENT_DECLINED", "Tài khoản không đủ số dư.");
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                request.IdempotencyKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+
+        var different = request with { Amount = request.Amount + 1m };
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(() =>
+            _service.ProcessPaymentCommandAsync(
+                different, TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+        _trip.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ProcessCommand_DecisionThrows_ShouldNotPersistOrSettle()
+    {
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
+        var decision = new Mock<IPaymentDecisionService>();
+        decision.Setup(x => x.DecideAsync(
+                It.IsAny<TripSnapshot>(),
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Temporary decision failure"));
+        var service = new PaymentApplicationService(
+            _repo.Object, _trip.Object, decision.Object);
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            service.ProcessPaymentCommandAsync(
+                request, TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.AddLedgerEntriesAsync(
+            It.IsAny<IEnumerable<LedgerEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+        _trip.Verify(x => x.MarkPaidAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessCommand_InvalidDeclineDecision_ShouldNotPersist()
+    {
+        var (request, snapshot) = NewRequest();
+        _trip.Setup(x => x.GetByIdAsync(
+                request.TripId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
+        var decision = new Mock<IPaymentDecisionService>();
+        decision.Setup(x => x.DecideAsync(
+                It.IsAny<TripSnapshot>(),
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentDecision(false, "UNRECOGNIZED", "Unknown reason"));
+        var service = new PaymentApplicationService(
+            _repo.Object, _trip.Object, decision.Object);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ProcessPaymentCommandAsync(
+                request, TestContext.Current.CancellationToken));
+
+        _repo.Verify(x => x.AddAsync(
+            It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SaveChangesAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
 }
