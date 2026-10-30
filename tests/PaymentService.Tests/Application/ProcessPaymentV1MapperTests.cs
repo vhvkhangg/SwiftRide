@@ -12,13 +12,14 @@ public sealed class ProcessPaymentV1MapperTests
         var riderId = Guid.NewGuid();
         var driverId = Guid.NewGuid();
 
+        var tripId = Guid.NewGuid();
         return new ProcessPaymentV1
         {
-            CorrelationId = Guid.NewGuid(),
-            TripId = Guid.NewGuid(),
+            CorrelationId = tripId,
+            TripId = tripId,
             Amount = 100_000m,
             Currency = "VND",
-            IdempotencyKey = Guid.NewGuid().ToString("N"),
+            IdempotencyKey = $"trip-{tripId:N}-payment-v1",
             PayerAccount = $"rider-{riderId:D}",
             PayeeAccount = $"driver-{driverId:D}",
             OccurredAtUtc = DateTimeOffset.UtcNow
@@ -83,5 +84,15 @@ public sealed class ProcessPaymentV1MapperTests
 
         Assert.Throws<ArgumentException>(
             () => ProcessPaymentV1Mapper.ToRequest(message));
+    }
+
+    [Fact]
+    public void EmptyIdempotencyKey_ShouldReject()
+    {
+        var message = NewMessage();
+        message.IdempotencyKey = string.Empty;
+
+        Assert.Throws<ArgumentException>(() =>
+            ProcessPaymentV1Mapper.ToRequest(message));
     }
 }

@@ -23,6 +23,12 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
             .HasMaxLength(128).IsRequired();
         builder.Property(x => x.IsTripSynced).HasColumnName("is_trip_synced")
             .HasDefaultValue(false).IsRequired();
+        builder.Property(x => x.FailureCode)
+            .HasColumnName("failure_code")
+            .HasMaxLength(64);
+        builder.Property(x => x.FailureReason)
+            .HasColumnName("failure_reason")
+            .HasMaxLength(256);
         builder.Property(x => x.Version)
             .HasColumnName("version")
             .HasDefaultValue(0L)

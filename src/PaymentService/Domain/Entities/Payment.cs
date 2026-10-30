@@ -12,6 +12,8 @@ public class Payment
     public string PayerAccount { get; private set; } = string.Empty;
     public string PayeeAccount { get; private set; } = string.Empty;
     public bool IsTripSynced { get; private set; }
+    public string? FailureCode { get; private set; }
+    public string? FailureReason { get; private set; }
     public long Version { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -60,9 +62,19 @@ public class Payment
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void MarkFailed()
+    public void MarkFailed() => MarkFailed("PAYMENT_DECLINED", "Thanh toán bị từ chối.");
+    public void MarkFailed(string code, string reason)
     {
         EnsureStatus(PaymentStatus.Pending);
+
+        if (string.IsNullOrWhiteSpace(code) || code.Length > 64)
+            throw new ArgumentException("FailureCode không hợp lệ.");
+
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length > 256)
+            throw new ArgumentException("FailureReason không hợp lệ.");
+
+        FailureCode = code;
+        FailureReason = reason;
         Status = PaymentStatus.Failed;
         Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
