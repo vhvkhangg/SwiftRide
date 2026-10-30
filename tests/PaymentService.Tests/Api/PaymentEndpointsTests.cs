@@ -67,6 +67,10 @@ public sealed class PaymentEndpointsTests
             route.RoutePattern.RawText?.TrimEnd('/') == "/payments" &&
             route.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
                 .Contains("POST") == true);
+
+        Assert.DoesNotContain(routes, route =>
+            route.RoutePattern.RawText?.TrimEnd('/') ==
+            "/payments/{id:guid}/reconcile");
     }
 
 }
