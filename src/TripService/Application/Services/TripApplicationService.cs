@@ -410,6 +410,8 @@ public sealed class TripApplicationService : ITripApplicationService
             return;
         }
 
+        if (trip.Status == TripStatus.Failed) return;
+
         if (trip.Status != TripStatus.PaymentPending)
             throw new InvalidOperationException(
                 $"Trip không ở trạng thái chờ thanh toán: '{trip.Status}'.");
@@ -431,6 +433,8 @@ public sealed class TripApplicationService : ITripApplicationService
             result.Currency != "VND" ||
             result.FailureCode != "PAYMENT_DECLINED" ||
             string.IsNullOrWhiteSpace(result.Reason) ||
+            result.Reason.Length > 256 || 
+            result.OccurredAtUtc == default ||
             result.IdempotencyKey != $"trip-{result.TripId:N}-payment-v1")
         {
             throw new InvalidOperationException("PaymentFailedV1 không hợp lệ.");
@@ -445,10 +449,9 @@ public sealed class TripApplicationService : ITripApplicationService
         }
 
         // Xử lý Event đến muộn khi chuyến đã Paid
-        if (trip.Status == TripStatus.Paid)
+        if (trip.Status == TripStatus.Paid || trip.Status == TripStatus.Failed)
         {
-            // Trả về ngay lập tức để RabbitMQ Ack (xóa message), tránh ném lỗi khiến Broker retry.
-            return;
+            return; 
         }
 
         // Đảm bảo chỉ xử lý khi chuyến đang chờ thanh toán
