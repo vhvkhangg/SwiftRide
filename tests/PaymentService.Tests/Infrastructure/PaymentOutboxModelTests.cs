@@ -87,4 +87,23 @@ public sealed class PaymentOutboxModelTests
             "20261022005935_AddPaymentConsumerOutbox",
             migrations);
     }
+
+    [Fact]
+    public void PaymentFailureMetadata_ShouldBeNullableAndBounded()
+    {
+        using var db = CreateContext();
+        var payment = db.Model.FindEntityType(typeof(Payment));
+        Assert.NotNull(payment);
+
+        var failureCode = payment.FindProperty(nameof(Payment.FailureCode));
+        var failureReason = payment.FindProperty(nameof(Payment.FailureReason));
+        Assert.NotNull(failureCode);
+        Assert.NotNull(failureReason);
+        Assert.True(failureCode.IsNullable);
+        Assert.True(failureReason.IsNullable);
+        Assert.Equal("failure_code", failureCode.GetColumnName());
+        Assert.Equal("failure_reason", failureReason.GetColumnName());
+        Assert.Equal(64, failureCode.GetMaxLength());
+        Assert.Equal(256, failureReason.GetMaxLength());
+    }
 }
