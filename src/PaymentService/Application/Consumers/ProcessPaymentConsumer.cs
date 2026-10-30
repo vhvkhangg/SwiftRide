@@ -106,7 +106,7 @@ public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
                 TripId = payment.TripId,
                 PaymentId = payment.Id,
                 Amount = payment.Amount,
-                Currency = context.Message.Currency,
+                Currency = "VND",
                 OccurredAtUtc = DateTimeOffset.UtcNow
             }, context.CancellationToken
         );
