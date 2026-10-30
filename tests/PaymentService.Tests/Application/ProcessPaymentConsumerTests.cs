@@ -20,13 +20,14 @@ public sealed class ProcessPaymentConsumerTests
         var rider = Guid.NewGuid();
         var driver = Guid.NewGuid();
 
+        var tripId = Guid.NewGuid();
         return new ProcessPaymentV1
         {
-            CorrelationId = Guid.NewGuid(),
-            TripId = Guid.NewGuid(),
+            CorrelationId = tripId,
+            TripId = tripId,
             Amount = 100_000m,
             Currency = "VND",
-            IdempotencyKey = Guid.NewGuid().ToString("N"),
+            IdempotencyKey = $"trip-{tripId:N}-payment-v1",
             PayerAccount = $"rider-{rider:D}",
             PayeeAccount = $"driver-{driver:D}",
             OccurredAtUtc = DateTimeOffset.UtcNow
@@ -196,6 +197,105 @@ public sealed class ProcessPaymentConsumerTests
             It.IsAny<PaymentFailedV1>(),
             It.IsAny<CancellationToken>()), Times.Never);
 
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentSucceededV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BusinessFailure_ShouldPublishCompletePaymentFailedEvent()
+    {
+        var message = NewMessage();
+        var paymentId = Guid.NewGuid();
+        var response = new PaymentResponse(
+            paymentId,
+            message.TripId,
+            message.Amount,
+            "Failed",
+            message.IdempotencyKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            false,
+            "PAYMENT_DECLINED",
+            "Thanh toán bị từ chối.");
+
+        _service.Setup(x => x.ProcessPaymentCommandAsync(
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+        var context = CreateContext(message);
+        var consumer = new ProcessPaymentConsumer(
+            _service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
+
+        await consumer.Consume(context.Object);
+
+        context.Verify(x => x.Publish(
+            It.Is<PaymentFailedV1>(e =>
+                e.CorrelationId == message.CorrelationId &&
+                e.TripId == message.TripId &&
+                e.PaymentId == paymentId &&
+                e.IdempotencyKey == message.IdempotencyKey &&
+                e.Amount == message.Amount &&
+                e.Currency == "VND" &&
+                e.FailureCode == "PAYMENT_DECLINED" &&
+                e.Reason == "Thanh toán bị từ chối." &&
+                e.OccurredAtUtc != default),
+            It.IsAny<CancellationToken>()), Times.Once);
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentSucceededV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task FailedWithoutFailureReason_ShouldNotPublishAnyResult()
+    {
+        var message = NewMessage();
+        _service.Setup(x => x.ProcessPaymentCommandAsync(
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentResponse(
+                Guid.NewGuid(), message.TripId, message.Amount,
+                "Failed", message.IdempotencyKey,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, false,
+                "PAYMENT_DECLINED", null));
+
+        var context = CreateContext(message);
+        var consumer = new ProcessPaymentConsumer(
+            _service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            consumer.Consume(context.Object));
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentSucceededV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentFailedV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MismatchedFailedPaymentResponse_ShouldNotPublishFailure()
+    {
+        var message = NewMessage();
+        _service.Setup(x => x.ProcessPaymentCommandAsync(
+                It.IsAny<CreatePaymentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentResponse(
+                Guid.NewGuid(), Guid.NewGuid(), message.Amount,
+                "Failed", message.IdempotencyKey,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, false,
+                "PAYMENT_DECLINED", "Thanh toán bị từ chối."));
+
+        var context = CreateContext(message);
+        var consumer = new ProcessPaymentConsumer(
+            _service.Object, NullLogger<ProcessPaymentConsumer>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            consumer.Consume(context.Object));
+        context.Verify(x => x.Publish(
+            It.IsAny<PaymentFailedV1>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         context.Verify(x => x.Publish(
             It.IsAny<PaymentSucceededV1>(),
             It.IsAny<CancellationToken>()), Times.Never);

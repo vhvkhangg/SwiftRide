@@ -1,4 +1,5 @@
 using SwiftRide.PaymentService.Domain.Entities;
+using SwiftRide.PaymentService.Application.DTOs;
 using SwiftRide.PaymentService.Domain.Enums;
 using Xunit;
 
@@ -103,4 +104,62 @@ public sealed class PaymentTests
     [Fact]
     public void MarkTripSynced_FromPending_ShouldThrow() =>
         Assert.Throws<InvalidOperationException>(NewPayment().MarkTripSynced);
+
+    [Fact]
+    public void MarkFailed_WithMetadata_ShouldPersistReasonAndIncrementVersion()
+    {
+        var payment = NewPayment();
+        var originalVersion = payment.Version;
+
+        payment.MarkFailed("PAYMENT_DECLINED", "Tài khoản không đủ số dư.");
+
+        Assert.Equal(PaymentStatus.Failed, payment.Status);
+        Assert.Equal("PAYMENT_DECLINED", payment.FailureCode);
+        Assert.Equal("Tài khoản không đủ số dư.", payment.FailureReason);
+        Assert.Equal(originalVersion + 1, payment.Version);
+        Assert.False(payment.IsTripSynced);
+    }
+
+    [Theory]
+    [InlineData("", "Reason")]
+    [InlineData("PAYMENT_DECLINED", "")]
+    [InlineData("PAYMENT_DECLINED", "   ")]
+    public void MarkFailed_InvalidMetadata_ShouldKeepPaymentPending(
+        string code, string reason)
+    {
+        var payment = NewPayment();
+        var originalVersion = payment.Version;
+
+        Assert.Throws<ArgumentException>(() =>
+            payment.MarkFailed(code, reason));
+
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal(originalVersion, payment.Version);
+    }
+
+    [Fact]
+    public void MarkFailed_AfterSuccess_ShouldNotOverwriteStatus()
+    {
+        var payment = NewPayment();
+        payment.MarkSucceeded();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            payment.MarkFailed("PAYMENT_DECLINED", "Too late"));
+
+        Assert.Equal(PaymentStatus.Succeeded, payment.Status);
+    }
+
+    [Fact]
+    public void FailedResponse_ShouldExposeFailureMetadata()
+    {
+        var payment = NewPayment();
+        payment.MarkFailed("PAYMENT_DECLINED", "Thanh toán bị từ chối.");
+
+        var response = PaymentResponse.From(payment);
+
+        Assert.Equal(payment.Id, response.Id);
+        Assert.Equal("Failed", response.Status);
+        Assert.Equal("PAYMENT_DECLINED", response.FailureCode);
+        Assert.Equal("Thanh toán bị từ chối.", response.FailureReason);
+    }
 }

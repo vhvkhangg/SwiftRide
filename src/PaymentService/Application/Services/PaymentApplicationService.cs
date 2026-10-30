@@ -12,11 +12,19 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
 {
     private readonly IPaymentRepository _payments;
     private readonly ITripServiceClient _trips;
+    private readonly IPaymentDecisionService _decision;
+    public PaymentApplicationService(IPaymentRepository payments, ITripServiceClient trips) : this(payments, trips, new ApprovePaymentDecisionService())
+    {
+    }
 
-    public PaymentApplicationService(IPaymentRepository payments, ITripServiceClient trips)
+    public PaymentApplicationService(
+        IPaymentRepository payments,
+        ITripServiceClient trips,
+        IPaymentDecisionService decision)
     {
         _payments = payments;
         _trips = trips;
+        _decision = decision;
     }
 
     public async Task<PaymentResponse> CreatePaymentAsync(
@@ -78,14 +86,13 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                     "IdempotencyKey đã được sử dụng cho payload khác.");
             }
 
-            if (existing.Status != PaymentStatus.Succeeded)
+            if (existing.Status is PaymentStatus.Succeeded or PaymentStatus.Failed)
             {
-                throw new PaymentCommandRejectedException(
-                    $"Payment với IdempotencyKey này đang ở " +
-                    $"trạng thái '{existing.Status}'.");
+                return PaymentResponse.From(existing);
             }
 
-            return PaymentResponse.From(existing);
+            throw new PaymentCommandRejectedException(
+                    $"Không thể xử lý lại Payment ở trạng thái '{existing.Status}'.");
         }
 
         var settled = await _payments.GetSettledByTripIdAsync(request.TripId, cancellationToken);
@@ -117,6 +124,36 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             throw new PaymentCommandRejectedException(ex.Message);
         }
 
+        var decision = await _decision.DecideAsync(
+            trip,
+            request,
+            cancellationToken
+        );
+
+        if (!decision.Approved)
+        {
+            if (decision.FailureCode != "PAYMENT_DECLINED" ||
+                string.IsNullOrWhiteSpace(decision.FailureReason))
+            {
+                throw new InvalidOperationException(
+                    "Payment decision không hợp lệ.");
+            }
+
+            var failed = Payment.Create(
+                request.TripId,
+                request.Amount,
+                request.IdempotencyKey,
+                request.PayerAccount,
+                request.PayeeAccount
+            );
+
+            failed.MarkFailed(decision.FailureCode, decision.FailureReason);
+
+            await _payments.AddAsync(failed, cancellationToken);
+            await _payments.SaveChangesAsync(cancellationToken);
+
+            return PaymentResponse.From(failed);
+        }
 
         var payment = await StoreNewPaymentAsync(
             request,
