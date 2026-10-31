@@ -7,11 +7,29 @@ namespace SwiftRide.MatchingService.Tests.Infrastructure;
 
 public sealed class MongoDriverRepositoryReservationTests
 {
+    private static async Task SkipIfMongoUnavailableAsync(IMongoClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(3));
+            await client.ListDatabaseNamesAsync(cts.Token);
+        }
+        catch
+        {
+            Assert.Skip("MongoDB không khả dụng hoặc chưa sẵn sàng kết nối.");
+        }
+    }
+
     [Fact]
     public async Task TryReserveAsync_AllowsOnlyOneOwnerAndIsIdempotent()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var client = new MongoClient("mongodb://localhost:27017");
+
+        // Kiểm tra kết nối trước khi chạy test
+        await SkipIfMongoUnavailableAsync(client, cancellationToken);
+
         var database = client.GetDatabase("swiftride_matching");
         var collection = database.GetCollection<DriverLocation>("drivers");
         var driverId = Guid.NewGuid().ToString("D");
