@@ -37,6 +37,7 @@ public interface ITripApplicationService
     Task MarkFailedAsync(Guid tripId, CancellationToken ct = default);
     Task HandlePaymentSucceededAsync(PaymentSucceededV1 result, CancellationToken ct = default);
     Task HandlePaymentFailedAsync(PaymentFailedV1 result, CancellationToken ct = default);
+    Task HandlePaymentFaultAsync(ProcessPaymentV1 command, CancellationToken ct = default);
 
     Task<TripResponse?> GetActiveTripAsync(Guid userId, string role, CancellationToken ct = default);
 }

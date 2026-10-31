@@ -71,7 +71,7 @@ public class TripApplicationServiceTests
                    .ReturnsAsync(existingTrip);
 
         // Act
-        var response = await _service.CreateAsync(request);
+        var response = await _service.CreateAsync(request, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(existingTrip.Id, response.Id);

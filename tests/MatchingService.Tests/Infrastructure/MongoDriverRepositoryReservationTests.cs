@@ -5,81 +5,54 @@ using SwiftRide.MatchingService.Infrastructure.Repositories;
 
 namespace SwiftRide.MatchingService.Tests.Infrastructure;
 
+[Trait("Category", "Integration")]
 public sealed class MongoDriverRepositoryReservationTests
 {
-    private static async Task SkipIfMongoUnavailableAsync(IMongoClient client, CancellationToken cancellationToken)
+    private static IMongoDatabase Database()
     {
-        try
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(3));
-            await client.ListDatabaseNamesAsync(cts.Token);
-        }
-        catch
-        {
-            Assert.Skip("MongoDB không khả dụng hoặc chưa sẵn sàng kết nối.");
-        }
+        var url = Environment.GetEnvironmentVariable("SWIFTRIDE_MATCHING_TEST_DB");
+        Assert.SkipUnless(url is not null || Environment.GetEnvironmentVariable("CI") == "true",
+            "Set SWIFTRIDE_MATCHING_TEST_DB to an isolated _test database.");
+        if (url is null || MongoUrl.Create(url).DatabaseName?.EndsWith("_test", StringComparison.Ordinal) != true)
+            throw new InvalidOperationException("Mongo tests require an isolated _test database.");
+        return new MongoClient(url).GetDatabase(MongoUrl.Create(url).DatabaseName);
     }
 
-    [Fact]
-    public async Task TryReserveAsync_AllowsOnlyOneOwnerAndIsIdempotent()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Reservations_HaveOneDriverAndOneOwner(bool sameAttempt)
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var client = new MongoClient("mongodb://localhost:27017");
-
-        // Kiểm tra kết nối trước khi chạy test
-        await SkipIfMongoUnavailableAsync(client, cancellationToken);
-
-        var database = client.GetDatabase("swiftride_matching");
+        var database = Database();
+        var repository = new MongoDriverRepository(database);
+        var ct = TestContext.Current.CancellationToken;
+        await repository.EnsureIndexesAsync(ct);
+        var drivers = new[] { Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D") };
+        var trips = new[] { Guid.NewGuid(), Guid.NewGuid() };
         var collection = database.GetCollection<DriverLocation>("drivers");
-        var driverId = Guid.NewGuid().ToString("D");
-
-        await collection.DeleteManyAsync(
-            Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
-            cancellationToken);
-        await collection.InsertOneAsync(new DriverLocation
-        {
-            DriverId = driverId,
-            Location = GeoJson.Point(GeoJson.Geographic(106.7009, 10.7769)),
-            IsAvailable = true,
-            UpdatedAt = DateTime.UtcNow
-        }, cancellationToken: cancellationToken);
-
         try
         {
-            var repository = new MongoDriverRepository(client);
-            var expiry = DateTime.UtcNow.AddMinutes(2);
-            var firstTrip = Guid.NewGuid();
-            var secondTrip = Guid.NewGuid();
-
+            foreach (var driver in drivers)
+                await repository.UpsertLocationAsync(driver, GeoJson.Point(GeoJson.Geographic(106.7, 10.77)), true, ct);
+            var expiry = DateTime.UtcNow.AddMinutes(-1);
             var results = await Task.WhenAll(
-                repository.TryReserveAsync(driverId, firstTrip, 1, expiry, cancellationToken),
-                repository.TryReserveAsync(driverId, secondTrip, 1, expiry, cancellationToken));
-
-            Assert.Equal(1, results.Count(result => result));
-            Assert.True(await repository.TryReserveAsync(
-                driverId, firstTrip, 1, expiry, cancellationToken)
-                || await repository.TryReserveAsync(
-                    driverId, secondTrip, 1, expiry, cancellationToken));
-
-            var current = await collection.Find(
-                    Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId))
-                    .SingleAsync(cancellationToken);
-            Assert.False(current.IsAvailable);
-            Assert.NotNull(current.ReservationTripId);
-            Assert.Equal(1, current.ReservationAttempt);
-
-            var wrongOwner = current.ReservationTripId == firstTrip ? secondTrip : firstTrip;
-            Assert.False(await repository.ReleaseReservationAsync(
-                driverId, wrongOwner, 1, cancellationToken));
-            Assert.True(await repository.ReleaseReservationAsync(
-                driverId, current.ReservationTripId!.Value, 1, cancellationToken));
+                repository.TryReserveAsync(drivers[0], trips[0], 1, expiry, ct),
+                repository.TryReserveAsync(sameAttempt ? drivers[1] : drivers[0], sameAttempt ? trips[0] : trips[1], 1, expiry, ct));
+            Assert.Single(results, result => result);
+            var owner = await collection.Find(driver => driver.ReservationTripId != null &&
+                (driver.DriverId == drivers[0] || driver.DriverId == drivers[1])).SingleAsync(ct);
+            Assert.NotNull(await new MongoDriverRepository(database).FindReservationAsync(owner.ReservationTripId!.Value, 1, ct));
+            Assert.True(await repository.TryReserveAsync(owner.DriverId, owner.ReservationTripId.Value, 1, expiry, ct));
+            await repository.UpsertLocationAsync(owner.DriverId, owner.Location, true, ct);
+            var stored = await collection.Find(driver => driver.DriverId == owner.DriverId).SingleAsync(ct);
+            Assert.False(stored.IsAvailable);
+            Assert.False(await repository.ReleaseReservationAsync(owner.DriverId, Guid.NewGuid(), 1, ct));
+            Assert.True(await repository.ReleaseReservationAsync(owner.DriverId, owner.ReservationTripId.Value, 1, ct));
+            Assert.False(await repository.ReleaseReservationAsync(owner.DriverId, owner.ReservationTripId.Value, 1, ct));
         }
         finally
         {
-            await collection.DeleteManyAsync(
-                Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
-                cancellationToken);
+            await collection.DeleteManyAsync(Builders<DriverLocation>.Filter.In(driver => driver.DriverId, drivers), ct);
         }
     }
 }

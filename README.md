@@ -131,7 +131,7 @@ Core nên triển khai pattern vì có nhu cầu nghiệp vụ, không phải đ
 - **Dependency Injection / DIP**: application/domain phụ thuộc abstraction thay vì hạ tầng cụ thể.
 - **Factory**: chỉ cần nếu có nhiều kiểu payment method cần khởi tạo khác nhau.
 
-Pub/Sub dùng RabbitMQ/MassTransit. Outbox và Saga chưa được triển khai.
+Pub/Sub dùng RabbitMQ/MassTransit. Trip và Payment dùng EF inbox/outbox; Matching giữ reservation trong MongoDB. Chưa dùng Saga framework. Runbook hiện tại: [messaging.md](docs/messaging.md).
 
 ## 8. Chạy project
 
@@ -169,12 +169,13 @@ Database local:
 ### Chạy test
 
 ```bash
-dotnet test SwiftRide.sln
+dotnet test --solution SwiftRide.sln -- --filter-not-trait Category=Integration
+python tests/System/messaging.py --dotnet dotnet
 ```
 
 ## 9. Ghi chú scaffold
 
-Package này là **khung khởi tạo**, chưa chứa implementation nghiệp vụ của Trip/Matching/Pricing/Payment. Các `Program.cs`, DbContext và health endpoint chỉ tạo baseline để nhóm bắt đầu code trên cùng một cấu trúc thống nhất.
+Repository đã có luồng Trip/Matching/Pricing/Payment, reservation và inbox/outbox. Payment hiện mô phỏng ledger, chưa tích hợp PSP/ngân hàng thật. Xem [runbook](docs/messaging.md) và [bằng chứng kiểm thử](docs/task5-results.md).
 
 ## Authentication tại Gateway
 

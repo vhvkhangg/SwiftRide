@@ -14,6 +14,8 @@ public static class MessagingTopology
         bus.Message<DriverMatchedV1>(x => x.SetEntityName("swiftride-driver-matched-v1"));
         bus.Message<DriverMatchFailedV1>(x => x.SetEntityName("swiftride-driver-match-failed-v1"));
         bus.Message<FindDriverForTripV1>(x => x.SetEntityName("swiftride-find-driver-for-trip-v1"));
+        bus.Message<ReleaseDriverV1>(x => x.SetEntityName("swiftride-release-driver-v1"));
+        bus.Message<Fault<ProcessPaymentV1>>(x => x.SetEntityName("swiftride-payment-fault-v1"));
         bus.Message<DriverFoundForTripV1>(x => x.SetEntityName("swiftride-driver-found-for-trip-v1"));
         bus.Message<NoDriverFoundForTripV1>(x => x.SetEntityName("swiftride-no-driver-found-for-trip-v1"));
         bus.Message<ProcessPaymentV1>(x => x.SetEntityName("swiftride-process-payment-v1"));
@@ -25,16 +27,12 @@ public static class MessagingTopology
     {
         // Chỉ gọi từ chương trình Setup với DeployTopologyOnly = true.
         // Tạo queue/binding nhưng không lấy message ra khỏi queue.
-        bus.ReceiveEndpoint(MessagingEndpoints.MatchingTripRequested,
-            endpoint => endpoint.Bind<TripRequestedV1>());
         bus.ReceiveEndpoint(MessagingEndpoints.MatchingFindDriverForTrip,
             endpoint => endpoint.ConfigureConsumeTopology = false);
-
-        bus.ReceiveEndpoint(MessagingEndpoints.TripDriverMatched,
-            endpoint => endpoint.Bind<DriverMatchedV1>());
-
-        bus.ReceiveEndpoint(MessagingEndpoints.TripDriverMatchFailed,
-            endpoint => endpoint.Bind<DriverMatchFailedV1>());
+        bus.ReceiveEndpoint(MessagingEndpoints.MatchingReleaseDriver,
+            endpoint => endpoint.ConfigureConsumeTopology = false);
+        bus.ReceiveEndpoint(MessagingEndpoints.TripPaymentFault,
+            endpoint => endpoint.Bind<Fault<ProcessPaymentV1>>());
         bus.ReceiveEndpoint(MessagingEndpoints.TripDriverFoundForTrip,
             endpoint => endpoint.Bind<DriverFoundForTripV1>());
         bus.ReceiveEndpoint(MessagingEndpoints.TripNoDriverFoundForTrip,

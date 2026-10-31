@@ -63,28 +63,38 @@ public sealed class MatchingService(IDriverRepository repository) : IMatchingSer
             if (id == Guid.Empty)
                 throw new ArgumentException("ExcludedDriverIds không được chứa GUID rỗng.", nameof(request));
             return id.ToString("D");
-        }).ToArray();
-        var result = await repository.FindNearestAvailableAsync(
-            request.PickupLatitude,
-            request.PickupLongitude,
-            request.RadiusKm,
-            excluded,
-            cancellationToken);
+        }).ToList();
+        for (var retry = 0; retry < 16; retry++)
+        {
+            var result = await repository.FindNearestAvailableAsync(
+                request.PickupLatitude,
+                request.PickupLongitude,
+                request.RadiusKm,
+                excluded,
+                cancellationToken);
 
-        if (result is null) return null;
-        if (!Guid.TryParse(result.Value.Driver.DriverId, out var driverId) || driverId == Guid.Empty)
-            return null;
+            if (result is null)
+            {
+                var concurrent = await repository.FindReservationAsync(request.TripId, request.Attempt, cancellationToken);
+                return concurrent is null ? null : ToMatchedDriver(concurrent, 0);
+            }
+            if (!Guid.TryParse(result.Value.Driver.DriverId, out var driverId) || driverId == Guid.Empty)
+                return null;
 
-        var reserved = await repository.TryReserveAsync(
-            result.Value.Driver.DriverId,
-            request.TripId,
-            request.Attempt,
-            DateTime.UtcNow.Add(ReservationDuration),
-            cancellationToken);
-        if (!reserved)
-            return null;
-
-        return ToMatchedDriver(result.Value.Driver, result.Value.DistanceKm);
+            var reserved = await repository.TryReserveAsync(
+                result.Value.Driver.DriverId,
+                request.TripId,
+                request.Attempt,
+                DateTime.UtcNow.Add(ReservationDuration),
+                cancellationToken);
+            if (reserved)
+                return ToMatchedDriver(result.Value.Driver, result.Value.DistanceKm);
+            var winner = await repository.FindReservationAsync(request.TripId, request.Attempt, cancellationToken);
+            if (winner is not null)
+                return ToMatchedDriver(winner, 0);
+            excluded.Add(result.Value.Driver.DriverId);
+        }
+        throw new InvalidOperationException("Reservation contention; retry instead of reporting no drivers.");
     }
 
     private static MatchedDriver ToMatchedDriver(DriverLocation driver, double distanceKm)

@@ -10,6 +10,7 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
     {
         // Đặt khóa chính
         builder.HasKey(t => t.Id);
+        builder.HasIndex(t => t.IdempotencyKey).IsUnique();
 
         // Map enum Status thành chuỗi 
         builder.Property(t => t.Status)

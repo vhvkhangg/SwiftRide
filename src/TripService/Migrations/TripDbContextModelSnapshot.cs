@@ -234,10 +234,16 @@ namespace SwiftRide.TripService.Migrations
                     b.Property<decimal?>("FareEstimate")
                         .HasColumnType("numeric");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasColumnType("text");
+
                     b.Property<int>("MatchingAttempt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("PayloadHash")
+                        .HasColumnType("text");
 
                     b.Property<string>("PaymentFailureReason")
                         .HasMaxLength(1000)
@@ -272,6 +278,9 @@ namespace SwiftRide.TripService.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
 
                     b.ToTable("Trips");
                 });

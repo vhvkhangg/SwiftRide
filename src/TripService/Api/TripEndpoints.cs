@@ -159,6 +159,7 @@ public static class TripEndpoints
                     trip.RiderId,
                     trip.DriverId,
                     trip.FareEstimate,
+                      trip.MatchingAttempt,
                     Status = trip.Status.ToString()
                 });
         }).RequireAuthorization("InternalRead");

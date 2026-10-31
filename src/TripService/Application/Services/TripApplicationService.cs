@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Payments;
 using SwiftRide.Messaging;
@@ -103,7 +105,15 @@ public sealed class TripApplicationService : ITripApplicationService
             request.IdempotencyKey,
             GeneratePayloadHash(request)); // Băm DTO
 
-        await _writer.AddAsync(trip, ct);
+        try { await _writer.AddAsync(trip, ct); }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+            { SqlState: "23505", ConstraintName: "IX_Trips_IdempotencyKey" })
+        {
+            var winner = await _reader.GetByIdempotencyKeyAsync(request.IdempotencyKey!, ct);
+            if (winner is null || winner.PayloadHash != trip.PayloadHash)
+                throw new InvalidOperationException("IdempotencyKey already belongs to a different payload.", exception);
+            return ToResponse(winner);
+        }
         return ToResponse(trip);
     }
 
@@ -332,6 +342,7 @@ public sealed class TripApplicationService : ITripApplicationService
             try
             {
                 await _messageBus.SendPaymentAsync(payment, transactionCt);
+                await _messageBus.ReleaseDriverAsync(trip.DriverId.Value, trip.Id, transactionCt);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -353,10 +364,7 @@ public sealed class TripApplicationService : ITripApplicationService
             await _writer.SaveAsync(trip, transactionCt);
 
             // Nếu chuyến bị hủy mà đã có tài xế nhận, phải giải phóng họ
-            if (trip.DriverId.HasValue)
-            {
-                await _messageBus.ReleaseDriverAsync(trip.DriverId.Value, trip.Id, transactionCt);
-            }
+            await _messageBus.ReleaseDriverAsync(trip.DriverId ?? Guid.Empty, trip.Id, transactionCt);
 
             return ToResponse(trip);
         }, ct);
@@ -457,12 +465,20 @@ public sealed class TripApplicationService : ITripApplicationService
         if (trip.Status != TripStatus.PaymentPending) return;
 
         // Chống ghi lặp Reason và thay đổi trạng thái
-        if (string.IsNullOrWhiteSpace(trip.PaymentFailureReason))
-        {
-            trip.RecordPaymentFailure(result.Reason);
-            trip.MarkFailed();
-            await SaveAndNotifyAsync(trip, ct);
-        }
+        trip.RecordPaymentFailure(result.Reason);
+        trip.MarkFailed();
+        await SaveAndNotifyAsync(trip, ct);
+    }
+
+    public async Task HandlePaymentFaultAsync(ProcessPaymentV1 command, CancellationToken ct = default)
+    {
+        if (command.TripId == Guid.Empty || command.CorrelationId != command.TripId ||
+            command.IdempotencyKey != $"trip-{command.TripId:N}-payment-v1")
+            throw new ArgumentException("Invalid faulted payment command.");
+        var trip = await GetTripAsync(command.TripId, ct);
+        if (trip.Status != TripStatus.PaymentPending) return;
+        trip.RecordPaymentFailure("Technical payment failure; inspect swiftride-payment-process-payment_error before replay.");
+        await SaveAndNotifyAsync(trip, ct);
     }
 
     private async Task SendFindDriverAsync(Trip trip, int attempt, CancellationToken ct)

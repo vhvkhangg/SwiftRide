@@ -29,7 +29,8 @@ public sealed class TripRepository : ITripReader, ITripWriter
     public async Task AddAsync(Trip trip, CancellationToken ct = default)
     {
         await _db.Trips.AddAsync(trip, ct);
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch { _db.Entry(trip).State = EntityState.Detached; throw; }
     }
 
     public async Task SaveAsync(Trip trip, CancellationToken ct = default)

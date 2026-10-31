@@ -1,0 +1,47 @@
+name: Build and test SwiftRide
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Restore and audit dependencies
+        run: dotnet restore SwiftRide.sln -p:NuGetAuditMode=all -warnaserror:NU1901,NU1902,NU1903,NU1904
+      - name: Build whole solution
+        run: dotnet build SwiftRide.sln -c Release --no-restore
+      - name: Unit and local HTTP tests
+        run: dotnet test --solution SwiftRide.sln -c Release --no-build -- --filter-not-trait Category=Integration
+      - name: System test helper checks
+        run: python3 -m unittest discover -s tests/System -p 'test_*.py'
+
+  integration:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet build SwiftRide.sln -c Release
+      - name: Real database integration and full-stack recovery
+        run: python3 tests/System/messaging.py --dotnet dotnet
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: task5-system-report
+          path: artifacts/task5/system-current/report.json
+          if-no-files-found: error

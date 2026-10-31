@@ -1,5 +1,7 @@
 # Kết quả chạy NV6 — 16/10/2026
 
+Đây là báo cáo lịch sử, không phải runbook hiện tại hoặc kết quả của Task 5. Hướng dẫn vận hành: [messaging.md](messaging.md). Bằng chứng mới: [task5-results.md](task5-results.md).
+
 ## Khởi động
 
 ```powershell

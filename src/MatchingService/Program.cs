@@ -17,8 +17,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSwiftRideMessaging(builder.Configuration, "matching", consumers =>
 {
     // Gắn đúng queue đã được Messaging.Setup tạo; retry chung vẫn áp dụng.
-    consumers.AddConsumer<TripRequestedConsumer>()
-        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.MatchingTripRequested);
+    consumers.AddConsumer<ReleaseDriverConsumer>()
+        .Endpoint(endpoint =>
+        {
+            endpoint.Name = MessagingEndpoints.MatchingReleaseDriver;
+            endpoint.ConfigureConsumeTopology = false;
+        });
     consumers.AddConsumer<FindDriverForTripConsumer>()
         .Endpoint(endpoint =>
         {
@@ -32,7 +36,9 @@ var mongoConnectionString = builder.Configuration.GetConnectionString("MatchDb")
 
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnectionString));
 builder.Services.AddSingleton<IMongoDatabase>(serviceProvider =>
-    serviceProvider.GetRequiredService<IMongoClient>().GetDatabase("swiftride_matching"));
+    serviceProvider.GetRequiredService<IMongoClient>().GetDatabase(
+        MongoUrl.Create(mongoConnectionString).DatabaseName ?? "swiftride_matching"));
+builder.Services.AddHostedService<ReservationRecoveryWorker>();
 builder.Services.AddSingleton<IDriverRepository, MongoDriverRepository>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 builder.Services.AddScoped<IPricingService, PricingService>();
@@ -80,7 +86,7 @@ app.UseAuthorization();
 
 await app.Services.GetRequiredService<IDriverRepository>().EnsureIndexesAsync(CancellationToken.None);
 var mongoClient = app.Services.GetRequiredService<IMongoClient>();
-await MongoDbSeeder.SeedAsync(mongoClient.GetDatabase("swiftride_matching"));
+await MongoDbSeeder.SeedAsync(app.Services.GetRequiredService<IMongoDatabase>());
 app.Run();
 
 public partial class Program;
