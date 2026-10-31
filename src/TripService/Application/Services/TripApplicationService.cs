@@ -73,8 +73,8 @@ public sealed class TripApplicationService : ITripApplicationService
             request.PickupAddress.Length > 500 || request.DropoffAddress.Length > 500)
             throw new ArgumentException("Cần RiderId và hai địa chỉ hợp lệ, tối đa 500 ký tự.");
 
-        if (request.Distance < 0 || request.EstimatedTime < 0 || request.Surge <= 0)
-            throw new ArgumentException("Quãng đường và thời gian không được âm; hệ số surge phải lớn hơn 0.");
+        if (request.Distance < 0 || request.EstimatedTime < 0)
+            throw new ArgumentException("Quãng đường và thời gian không được âm.");
 
         if (!request.PickupLatitude.HasValue || !request.PickupLongitude.HasValue ||
             !double.IsFinite(request.PickupLatitude.Value) ||
@@ -89,7 +89,6 @@ public sealed class TripApplicationService : ITripApplicationService
             request.Distance,
             request.EstimatedTime,
             request.RideType,
-            request.Surge,
             request.PromoCode),
         ct);
 
