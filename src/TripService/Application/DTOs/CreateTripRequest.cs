@@ -11,7 +11,6 @@ public sealed record CreateTripRequest(
     decimal Distance,
     decimal EstimatedTime,
     string? RideType = null,
-    decimal Surge = 1m,
     string? PromoCode = null,
     string? IdempotencyKey = null 
 );

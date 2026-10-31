@@ -30,7 +30,7 @@ public sealed class MatchingPricingClientTests
         var client = new MatchingPricingClient(http);
 
         var quote = await client.GetQuoteAsync(
-            new MatchingQuoteRequest(5, 10, null, 1, null),
+            new MatchingQuoteRequest(5, 10, null, null),
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Post, sentRequest!.Method);

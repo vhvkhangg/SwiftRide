@@ -14,5 +14,20 @@ public interface IDriverRepository
         double radiusKm,
         IReadOnlyCollection<string> excludedDriverIds,
         CancellationToken cancellationToken);
+    Task<DriverLocation?> FindReservationAsync(
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken);
+    Task<bool> TryReserveAsync(
+        string driverId,
+        Guid tripId,
+        int attempt,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken);
+    Task<bool> ReleaseReservationAsync(
+        string driverId,
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken);
     Task SetAvailabilityAsync(string driverId, bool isAvailable, CancellationToken cancellationToken);
 }

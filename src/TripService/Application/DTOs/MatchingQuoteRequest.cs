@@ -4,5 +4,4 @@ public sealed record MatchingQuoteRequest(
     decimal Distance,
     decimal EstimatedTime,
     string? RideType,
-    decimal Surge,
     string? PromoCode);

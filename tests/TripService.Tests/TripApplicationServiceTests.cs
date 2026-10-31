@@ -59,7 +59,7 @@ public class TripApplicationServiceTests
     {
         // Arrange
         var idempotencyKey = "key-test-123";
-        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", 1m, null, idempotencyKey);
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", null, idempotencyKey);
 
         var payloadForHash = new { request.RiderId, request.PickupAddress, request.DropoffAddress, request.Distance };
         var hash = ComputeHash(payloadForHash);
@@ -84,7 +84,7 @@ public class TripApplicationServiceTests
         // Arrange
         var idempotencyKey = "key-test-123";
         // SỬA CS1503: Truyền đầy đủ 10.0, 106.0 cho Latitude/Longitude để không bị lệch tham số
-        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", 1m, null, idempotencyKey);
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", null, idempotencyKey);
 
         // Cố tình tạo hash cũ khác với hash của request hiện tại
         var oldHash = "some-different-old-hash";

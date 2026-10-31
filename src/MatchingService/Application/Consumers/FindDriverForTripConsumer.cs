@@ -30,7 +30,22 @@ public sealed class FindDriverForTripConsumer(
         }
 
         if (!Guid.TryParse(candidate.DriverId, out var driverId) || driverId == Guid.Empty)
-            throw new InvalidOperationException("Matching trả về DriverId không hợp lệ.");
+        {
+            await context.Publish(new NoDriverFoundForTripV1
+            {
+                CorrelationId = command.CorrelationId,
+                TripId = command.TripId,
+                Attempt = command.Attempt,
+                Reason = "Ứng viên tài xế có DriverId không hợp lệ.",
+                OccurredAtUtc = DateTimeOffset.UtcNow
+            }, context.CancellationToken);
+
+            logger.LogWarning(
+                "Bỏ qua ứng viên có DriverId không hợp lệ cho Trip {TripId}, lượt {Attempt}",
+                command.TripId,
+                command.Attempt);
+            return;
+        }
 
         await context.Publish(new DriverFoundForTripV1
         {

@@ -10,25 +10,29 @@ public static class MatchingEndpoints
 {
     public static void MapMatchingEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/quote", async (
+        static async Task<IResult> CalculateQuoteAsync(
             QuoteRequestDto request,
             IPricingService service,
-            CancellationToken ct) =>
+            CancellationToken ct)
         {
             var result = await service.CalculateAsync(request.ToDomain(), ct);
-            return Results.Ok(new QuoteResponseDto(result.Base, result.Distance, result.Time, result.Surge,
-                result.Toll, result.Discount, result.Tax, result.Total));
-        })
+            return Results.Ok(new QuoteResponseDto(
+                result.Base,
+                result.Distance,
+                result.Time,
+                result.Surge,
+                result.Toll,
+                result.Discount,
+                result.Tax,
+                result.Total));
+        }
+
+        app.MapPost("/quote", CalculateQuoteAsync)
         .WithSummary("Tính toán báo giá chuyến đi")
         .WithTags("Định giá (Pricing)")
         .Produces<QuoteResponseDto>().RequireAuthorization(p => p.RequireRole("Rider"));
 
-        app.MapPost("/internal/quote", (QuoteRequestDto request, IPricingService service) =>
-        {
-            var result = service.Calculate(request.ToDomain());
-            return Results.Ok(new QuoteResponseDto(result.Base, result.Distance, result.Time, result.Surge,
-                result.Toll, result.Discount, result.Tax, result.Total));
-        })
+        app.MapPost("/internal/quote", CalculateQuoteAsync)
         .WithSummary("Tính báo giá cho Trip Service")
         .WithTags("Định giá (Pricing)")
         .Produces<QuoteResponseDto>().RequireAuthorization("InternalPricing");
