@@ -18,6 +18,8 @@ public static class MessagingTopology
         bus.Message<Fault<ProcessPaymentV1>>(x => x.SetEntityName("swiftride-payment-fault-v1"));
         bus.Message<DriverFoundForTripV1>(x => x.SetEntityName("swiftride-driver-found-for-trip-v1"));
         bus.Message<NoDriverFoundForTripV1>(x => x.SetEntityName("swiftride-no-driver-found-for-trip-v1"));
+        bus.Message<DriverReservationConfirmedV1>(x => x.SetEntityName("swiftride-driver-reservation-confirmed-v1"));
+        bus.Message<DriverReservationReleasedV1>(x => x.SetEntityName("swiftride-driver-reservation-released-v1"));
         bus.Message<ProcessPaymentV1>(x => x.SetEntityName("swiftride-process-payment-v1"));
         bus.Message<PaymentSucceededV1>(x => x.SetEntityName("swiftride-payment-succeeded-v1"));
         bus.Message<PaymentFailedV1>(x => x.SetEntityName("swiftride-payment-failed-v1"));
@@ -33,6 +35,16 @@ public static class MessagingTopology
             endpoint => endpoint.ConfigureConsumeTopology = false);
         bus.ReceiveEndpoint(MessagingEndpoints.TripPaymentFault,
             endpoint => endpoint.Bind<Fault<ProcessPaymentV1>>());
+        bus.ReceiveEndpoint(MessagingEndpoints.MatchingReservationConfirmed,
+            endpoint => endpoint.Bind<DriverReservationConfirmedV1>());
+        bus.ReceiveEndpoint(MessagingEndpoints.MatchingReservationReleased,
+            endpoint => endpoint.Bind<DriverReservationReleasedV1>());
+
+        bus.ReceiveEndpoint(MessagingEndpoints.TripDriverMatched,
+            endpoint => endpoint.Bind<DriverMatchedV1>());
+
+        bus.ReceiveEndpoint(MessagingEndpoints.TripDriverMatchFailed,
+            endpoint => endpoint.Bind<DriverMatchFailedV1>());
         bus.ReceiveEndpoint(MessagingEndpoints.TripDriverFoundForTrip,
             endpoint => endpoint.Bind<DriverFoundForTripV1>());
         bus.ReceiveEndpoint(MessagingEndpoints.TripNoDriverFoundForTrip,

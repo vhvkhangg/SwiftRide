@@ -31,5 +31,10 @@ public interface IDriverRepository
         CancellationToken cancellationToken);
     Task<IReadOnlyList<DriverLocation>> GetReservationsToReconcileAsync(CancellationToken cancellationToken);
     Task DeferReconciliationAsync(string driverId, Guid tripId, CancellationToken cancellationToken);
+    Task<bool> ConfirmReservationAsync(
+        string driverId,
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken);
     Task SetAvailabilityAsync(string driverId, bool isAvailable, CancellationToken cancellationToken);
 }

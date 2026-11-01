@@ -29,6 +29,10 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "matching", consum
             endpoint.Name = MessagingEndpoints.MatchingFindDriverForTrip;
             endpoint.ConfigureConsumeTopology = false;
         });
+    consumers.AddConsumer<DriverReservationConfirmedConsumer>()
+        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.MatchingReservationConfirmed);
+    consumers.AddConsumer<DriverReservationReleasedConsumer>()
+        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.MatchingReservationReleased);
 });
 
 var mongoConnectionString = builder.Configuration.GetConnectionString("MatchDb")

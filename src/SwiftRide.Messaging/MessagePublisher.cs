@@ -61,9 +61,33 @@ public class MessagePublisher : ITripMessageBus
         }, cancellationToken);
     }
 
-    public async Task ReleaseDriverAsync(Guid driverId, Guid tripId, CancellationToken cancellationToken = default)
-    {
-        var endpoint = await _sender.GetSendEndpoint(new Uri("queue:" + MessagingEndpoints.MatchingReleaseDriver));
-        await endpoint.Send(new ReleaseDriverV1 { DriverId = driverId, TripId = tripId, CorrelationId = tripId }, cancellationToken);
-    }
+    public Task ConfirmDriverReservationAsync(
+        Guid driverId,
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken = default) =>
+        _publisher.Publish(new DriverReservationConfirmedV1
+        {
+            CorrelationId = tripId,
+            TripId = tripId,
+            DriverId = driverId,
+            Attempt = attempt,
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+    public Task ReleaseDriverAsync(
+        Guid driverId,
+        Guid tripId,
+        int attempt,
+        string reason,
+        CancellationToken cancellationToken = default) =>
+        _publisher.Publish(new DriverReservationReleasedV1
+        {
+            CorrelationId = tripId,
+            TripId = tripId,
+            DriverId = driverId,
+            Attempt = attempt,
+            Reason = reason,
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        }, cancellationToken);
 }
