@@ -131,7 +131,12 @@ public sealed class MongoDriverRepository(IMongoDatabase database) : IDriverRepo
     {
         return await collection.Find(Builders<DriverLocation>.Filter.And(
                 Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
-                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt)))
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt),
+                Builders<DriverLocation>.Filter.Or(
+                    Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationExpiresAtUtc, null),
+                    Builders<DriverLocation>.Filter.Gt(
+                        driver => driver.ReservationExpiresAtUtc,
+                        DateTime.UtcNow))))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -148,7 +153,9 @@ public sealed class MongoDriverRepository(IMongoDatabase database) : IDriverRepo
             Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt));
         var available = Builders<DriverLocation>.Filter.And(
             Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
-            Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, null));
+            Builders<DriverLocation>.Filter.Or(
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, null),
+                Builders<DriverLocation>.Filter.Lt(driver => driver.ReservationExpiresAtUtc, now)));
         UpdateResult result;
         try
         {
@@ -202,6 +209,21 @@ public sealed class MongoDriverRepository(IMongoDatabase database) : IDriverRepo
             Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
             Builders<DriverLocation>.Update.Set(driver => driver.ReservationExpiresAtUtc, DateTime.UtcNow.AddMinutes(2)),
             cancellationToken: cancellationToken);
+    public async Task<bool> ConfirmReservationAsync(
+        string driverId,
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken)
+    {
+        var result = await collection.UpdateOneAsync(
+            Builders<DriverLocation>.Filter.And(
+                Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt)),
+            Builders<DriverLocation>.Update.Unset(driver => driver.ReservationExpiresAtUtc),
+            cancellationToken: cancellationToken);
+        return result.ModifiedCount > 0 || result.MatchedCount > 0;
+    }
 
     public async Task SetAvailabilityAsync(
         string driverId,

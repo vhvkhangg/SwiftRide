@@ -223,6 +223,8 @@ public sealed class TripApplicationService : ITripApplicationService
             // Bắt buộc: Đánh dấu lời mời đã được giải quyết để Timeout Worker không quét lại và gây lỗi đồng thời
             await _workflow.ResolveInvitationAsync(
                 tripId, request.DriverId, trip.MatchingAttempt, DateTime.UtcNow, false, transactionCt);
+            await _messageBus.ConfirmDriverReservationAsync(
+                request.DriverId, trip.Id, trip.MatchingAttempt, transactionCt);
 
             return ToResponse(trip);
         }, ct);
@@ -275,7 +277,12 @@ public sealed class TripApplicationService : ITripApplicationService
                 return null;
 
             // Phối hợp Task 3: Tài xế từ chối (Reject) hoặc hết giờ (Timeout) -> Giải phóng tài xế này
-            await _messageBus.ReleaseDriverAsync(driverId, tripId, transactionCt);
+            await _messageBus.ReleaseDriverAsync(
+                driverId,
+                tripId,
+                invitationAttempt,
+                timeout ? "invitation-timeout" : "driver-rejected",
+                transactionCt);
 
             if (trip.MatchingAttempt >= _options.MaxAttempts)
             {
@@ -342,7 +349,12 @@ public sealed class TripApplicationService : ITripApplicationService
             try
             {
                 await _messageBus.SendPaymentAsync(payment, transactionCt);
-                await _messageBus.ReleaseDriverAsync(trip.DriverId.Value, trip.Id, transactionCt);
+                await _messageBus.ReleaseDriverAsync(
+                    trip.DriverId.Value,
+                    trip.Id,
+                    trip.MatchingAttempt,
+                    "trip-payment-pending",
+                    transactionCt);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -363,8 +375,7 @@ public sealed class TripApplicationService : ITripApplicationService
             trip.Cancel();
             await _writer.SaveAsync(trip, transactionCt);
 
-            // Nếu chuyến bị hủy mà đã có tài xế nhận, phải giải phóng họ
-            await _messageBus.ReleaseDriverAsync(trip.DriverId ?? Guid.Empty, trip.Id, transactionCt);
+            await ReleaseTripReservationsAsync(trip, "trip-cancelled", transactionCt);
 
             return ToResponse(trip);
         }, ct);
@@ -386,6 +397,8 @@ public sealed class TripApplicationService : ITripApplicationService
 
         trip.MarkPaid();
         await SaveAndNotifyAsync(trip, ct);
+        await ReleaseTripReservationsAsync(trip, "trip-paid", ct);
+        await ReleaseTripReservationsAsync(trip, "trip-paid", ct);
     }
 
     public async Task MarkFailedAsync(Guid tripId, CancellationToken ct = default)
@@ -393,6 +406,7 @@ public sealed class TripApplicationService : ITripApplicationService
         var trip = await GetTripAsync(tripId, ct);
         trip.MarkFailed();
         await SaveAndNotifyAsync(trip, ct);
+        await ReleaseTripReservationsAsync(trip, "trip-failed", ct);
     }
 
     public async Task HandlePaymentSucceededAsync(PaymentSucceededV1 result, CancellationToken ct = default)
@@ -468,6 +482,7 @@ public sealed class TripApplicationService : ITripApplicationService
         trip.RecordPaymentFailure(result.Reason);
         trip.MarkFailed();
         await SaveAndNotifyAsync(trip, ct);
+        await ReleaseTripReservationsAsync(trip, "payment-failed", ct);
     }
 
     public async Task HandlePaymentFaultAsync(ProcessPaymentV1 command, CancellationToken ct = default)
@@ -479,6 +494,27 @@ public sealed class TripApplicationService : ITripApplicationService
         if (trip.Status != TripStatus.PaymentPending) return;
         trip.RecordPaymentFailure("Technical payment failure; inspect swiftride-payment-process-payment_error before replay.");
         await SaveAndNotifyAsync(trip, ct);
+    }
+
+    private async Task ReleaseTripReservationsAsync(
+        Trip trip,
+        string reason,
+        CancellationToken ct)
+    {
+        IEnumerable<Guid> driverIds = await _workflow.GetInvitedDriverIdsAsync(trip.Id, ct)
+            ?? Array.Empty<Guid>();
+        if (trip.DriverId.HasValue)
+            driverIds = driverIds.Append(trip.DriverId.Value).Distinct().ToArray();
+
+        foreach (var driverId in driverIds)
+        {
+            await _messageBus.ReleaseDriverAsync(
+                driverId,
+                trip.Id,
+                trip.MatchingAttempt,
+                reason,
+                ct);
+        }
     }
 
     private async Task SendFindDriverAsync(Trip trip, int attempt, CancellationToken ct)
