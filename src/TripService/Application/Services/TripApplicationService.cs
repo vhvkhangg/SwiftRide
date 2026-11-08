@@ -428,6 +428,7 @@ public sealed class TripApplicationService : ITripApplicationService
             result.CorrelationId != result.TripId ||
             result.PaymentId == Guid.Empty ||
             result.Amount <= 0 ||
+            result.OccurredAtUtc == default ||
             !string.Equals(result.Currency, "VND", StringComparison.Ordinal))
             throw new InvalidOperationException("PaymentSucceededV1 chứa dữ liệu không hợp lệ.");
 
@@ -500,12 +501,30 @@ public sealed class TripApplicationService : ITripApplicationService
     public async Task HandlePaymentFaultAsync(ProcessPaymentV1 command, CancellationToken ct = default)
     {
         if (command.TripId == Guid.Empty || command.CorrelationId != command.TripId ||
-            command.IdempotencyKey != $"trip-{command.TripId:N}-payment-v1")
+            command.IdempotencyKey != $"trip-{command.TripId:N}-payment-v1" ||
+            command.Amount <= 0 ||
+            decimal.Round(command.Amount, 2) != command.Amount ||
+            !string.Equals(command.Currency, "VND", StringComparison.Ordinal) ||
+            command.OccurredAtUtc == default ||
+            !IsCanonicalAccount(command.PayerAccount, "rider-") ||
+            !IsCanonicalAccount(command.PayeeAccount, "driver-"))
             throw new ArgumentException("Invalid faulted payment command.");
         var trip = await GetTripAsync(command.TripId, ct);
         if (trip.Status != TripStatus.PaymentPending) return;
         trip.RecordPaymentFailure("Technical payment failure; inspect swiftride-payment-process-payment_error before replay.");
         await SaveAndNotifyAsync(trip, ct);
+    }
+
+    private static bool IsCanonicalAccount(string? account, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(account) ||
+            !account.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+
+        var value = account[prefix.Length..];
+        return Guid.TryParseExact(value, "D", out var id) &&
+            id != Guid.Empty &&
+            string.Equals(account, $"{prefix}{id:D}", StringComparison.Ordinal);
     }
 
     private async Task ReleaseTripReservationsAsync(
