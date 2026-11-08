@@ -12,6 +12,7 @@ public sealed class DriverLocation
     public required string DriverId { get; set; }
     public required GeoJsonPoint<GeoJson2DGeographicCoordinates> Location { get; set; }
     public bool IsAvailable { get; set; }
+    public bool IsOnline { get; set; } = true;
     public DateTime UpdatedAt { get; set; }
     [BsonGuidRepresentation(GuidRepresentation.Standard)]
     public Guid? ReservationTripId { get; set; }

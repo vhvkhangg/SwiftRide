@@ -36,6 +36,53 @@ public sealed class ReservationTests
             It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(sameAttempt ? 1 : 2));
     }
 
+    [Fact]
+    public async Task Replay_ReturnsExistingReservationWithoutReservingAgain()
+    {
+        var repository = new Mock<IDriverRepository>();
+        var driver = Driver();
+        var request = new FindDriverForTripV1 { TripId = Guid.NewGuid(), Attempt = 1 };
+        repository.Setup(item => item.FindReservationAsync(request.TripId, 1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(driver);
+
+        var result = await new Matching(repository.Object).FindNextDriverAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(driver.DriverId, result!.DriverId);
+        repository.Verify(item => item.TryReserveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<int>(),
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Contention_IsBoundedAndDoesNotPublishFalseNoDriverResult()
+    {
+        var repository = new Mock<IDriverRepository>();
+        var request = new FindDriverForTripV1 { TripId = Guid.NewGuid(), Attempt = 1 };
+        repository.Setup(item => item.FindNearestAvailableAsync(0, 0, 5,
+                It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => (Driver(), 0.1));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new Matching(repository.Object).FindNextDriverAsync(request, TestContext.Current.CancellationToken));
+
+        repository.Verify(item => item.TryReserveAsync(It.IsAny<string>(), request.TripId, 1,
+            It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Exactly(16));
+    }
+
+    [Fact]
+    public async Task InvalidExclusions_AreRejectedBeforeExistingReservationLookup()
+    {
+        var repository = new Mock<IDriverRepository>();
+        var request = new FindDriverForTripV1
+        {
+            TripId = Guid.NewGuid(), Attempt = 1, ExcludedDriverIds = [Guid.Empty]
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            new Matching(repository.Object).FindNextDriverAsync(request, TestContext.Current.CancellationToken));
+
+        repository.VerifyNoOtherCalls();
+    }
+
     private static DriverLocation Driver() => new()
     {
         DriverId = Guid.NewGuid().ToString("D"), Location = GeoJson.Point(GeoJson.Geographic(106.7, 10.77)),

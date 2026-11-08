@@ -64,9 +64,18 @@ public sealed class PricingService(
         var filter = Builders<SurgeRuleDocument>.Filter.And(
             Builders<SurgeRuleDocument>.Filter.Lte(rule => rule.StartHour, localHour),
             Builders<SurgeRuleDocument>.Filter.Gt(rule => rule.EndHour, localHour));
-        var cursor = await collection.FindAsync(filter, cancellationToken: cancellationToken);
+        var cursor = await collection.FindAsync(filter, new FindOptions<SurgeRuleDocument>
+        {
+            Sort = Builders<SurgeRuleDocument>.Sort.Descending(rule => rule.Multiplier),
+            Limit = 1
+        }, cancellationToken);
         var rule = await cursor.FirstOrDefaultAsync(cancellationToken);
-        return rule?.Multiplier ?? 1.0m;
+        if (rule is null)
+            return 1.0m;
+        if (rule.StartHour is < 0 or > 23 || rule.EndHour is < 1 or > 24 ||
+            rule.StartHour >= rule.EndHour || rule.Multiplier < 1m)
+            throw new InvalidOperationException("Cấu hình surge không hợp lệ.");
+        return rule.Multiplier;
     }
 
     private async Task<decimal> GetDiscountRateAsync(
@@ -78,8 +87,9 @@ public sealed class PricingService(
             return 0m;
 
         var collection = database.GetCollection<PromoCodeDocument>("promo_codes");
+        var normalizedCode = promoCode.Trim().ToUpperInvariant();
         var filter = Builders<PromoCodeDocument>.Filter.And(
-            Builders<PromoCodeDocument>.Filter.Eq(document => document.Code, promoCode),
+            Builders<PromoCodeDocument>.Filter.Eq(document => document.Code, normalizedCode),
             Builders<PromoCodeDocument>.Filter.Eq(document => document.IsActive, true),
             Builders<PromoCodeDocument>.Filter.Gt(document => document.ExpiredAt, utcNow));
         var cursor = await collection.FindAsync(filter, cancellationToken: cancellationToken);
@@ -89,7 +99,12 @@ public sealed class PricingService(
 
     private static void Validate(QuoteRequest request)
     {
-        if (request.Distance < 0 || request.EstimatedTime < 0)
-            throw new ArgumentOutOfRangeException(nameof(request), "Khoảng cách và thời gian dự kiến không được nhỏ hơn 0.");
+        if (request.Distance <= 0 || request.Distance > 1000 || request.EstimatedTime <= 0 || request.EstimatedTime > 1440)
+            throw new ArgumentOutOfRangeException(nameof(request), "Khoảng cách phải trong 0-1000 km và thời gian trong 0-1440 phút.");
+        if (!string.IsNullOrWhiteSpace(request.RideType) &&
+            !string.Equals(request.RideType, "Standard", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.RideType, "Car", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.RideType, "Moto", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("RideType không được hỗ trợ.", nameof(request));
     }
 }

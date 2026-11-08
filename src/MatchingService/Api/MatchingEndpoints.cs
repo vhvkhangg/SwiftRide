@@ -73,6 +73,9 @@ public static class MatchingEndpoints
         app.MapPost("/api/drivers/location", async (
             DriverLocationRequestDto request, IDriverRepository repository, HttpContext context, CancellationToken ct) =>
         {
+            if (!double.IsFinite(request.Latitude) || !double.IsFinite(request.Longitude) ||
+                request.Latitude is < -90 or > 90 || request.Longitude is < -180 or > 180)
+                return Results.BadRequest(new { error = "Tọa độ vị trí không hợp lệ." });
             var driverId = context.User.UserId().ToString();
             if (string.IsNullOrWhiteSpace(driverId))
                 return Results.Unauthorized();

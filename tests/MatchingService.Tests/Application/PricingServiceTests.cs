@@ -85,6 +85,34 @@ public sealed class PricingServiceTests
         Assert.Equal(0m, result.Discount);
     }
 
+    [Fact]
+    public async Task CalculateAsync_NormalizesPromoCodeAndRideType()
+    {
+        var now = new DateTime(2026, 10, 23, 3, 0, 0, DateTimeKind.Utc);
+        var service = CreateService(now, surgeRule: null, promoCode: new PromoCodeDocument
+        {
+            Code = "SWIFTRIDE2026", DiscountRate = 0.1m, IsActive = true, ExpiredAt = now.AddDays(1)
+        });
+
+        var result = await service.CalculateAsync(
+            new QuoteRequest(10m, 20m, "moto", " swiftride2026 "),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ExpectedTotal(1m, 0.9m), result.Total);
+    }
+
+    [Theory]
+    [InlineData(0, 10, "Car")]
+    [InlineData(10, 1441, "Car")]
+    [InlineData(10, 10, "Truck")]
+    public async Task CalculateAsync_RejectsUnsupportedQuoteInput(decimal distance, decimal time, string rideType)
+    {
+        var service = CreateService(DateTime.UtcNow, surgeRule: null);
+
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => service.CalculateAsync(
+            new QuoteRequest(distance, time, rideType, null), TestContext.Current.CancellationToken));
+    }
+
     [Theory]
     [InlineData(-1, 20)]
     [InlineData(10, -1)]
