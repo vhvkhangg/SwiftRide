@@ -35,6 +35,8 @@ docker compose logs --tail 100 messaging-setup trip-service matching-service pay
 
 Compose enables startup EF migrations for Trip/Payment, seeds Mongo pricing and enables development Auth/demo accounts. Base Compose keeps Auth EnsureCreated for existing development volumes. Task 1 supplies Auth EF migrations: on a new database set AUTH_DB_MIGRATE=true and AUTH_DB_ENSURE_CREATED=false; never enable both or run the initial migration over an existing EnsureCreated schema without a reviewed baseline/backup. Configure secrets from a protected environment before non-local use. Service `/health/ready` checks readiness, not full business correctness.
 
+MongoDB startup on affected Linux kernels: CI run `42462493847` failed with Mongo fatal `12257600` (SERVER-121912), even on the `ubuntu-24.04` runner. The runner label does not pin its host kernel. Compose sets `GLIBC_TUNABLES=glibc.pthread.rseq=1` so glibc registers rseq and TCMalloc falls back from per-CPU caches. The system test checks `db.serverStatus().tcmalloc.usingPerCPUCaches == false`; disabling glibc rseq with `=0` does not avoid this incompatibility. This trades allocator performance for compatibility in the development/test stack. The system overlay pins `mongo:8.0.34`; the base image stays unchanged to avoid downgrading existing development volumes. Do not remove volumes or bypass Mongo startup guards. Reassess this workaround when upgrading Mongo and the host kernel.
+
 Before upgrading existing volumes, back up both PostgreSQL databases and Mongo using the configured database/user names. Example for default local Trip DB:
 
 ```powershell
