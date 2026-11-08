@@ -1,9 +1,27 @@
 import unittest
+import subprocess
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import messaging
 
 
 class HttpTests(unittest.TestCase):
+    def test_command_failure_keeps_redacted_combined_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stack = object.__new__(messaging.Stack)
+            stack.env = {}
+            stack.secrets = ["test-secret"]
+            stack.output = Path(directory)
+            with patch("subprocess.run", return_value=subprocess.CompletedProcess(
+                    ["docker"], 1, stdout="pull progress\ncontainer failed: test-secret")) as run:
+                with self.assertRaisesRegex(RuntimeError, r"container failed: \[redacted\]"):
+                    stack.run(["docker"])
+            self.assertEqual(subprocess.STDOUT, run.call_args.kwargs["stderr"])
+            log = (stack.output / "command-failure.log").read_text(encoding="utf-8")
+            self.assertIn("container failed: [redacted]", log)
+            self.assertNotIn("test-secret", log)
+
     def test_health_plain_text_and_json_response(self):
         response = MagicMock()
         response.status = 200

@@ -46,5 +46,8 @@ jobs:
         if: always()
         with:
           name: task5-system-report
-          path: artifacts/task5/system-current/report.json
+          path: |
+            artifacts/task5/system-current/report.json
+            artifacts/task5/system-current/command-failure.log
+            artifacts/task5/system-current/services.log
           if-no-files-found: error

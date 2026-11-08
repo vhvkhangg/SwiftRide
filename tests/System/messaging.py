@@ -60,8 +60,9 @@ def http(method, url, body=None, token=None, expected=200, headers=None):
 
 
 class Stack:
-    def __init__(self, project):
+    def __init__(self, project, output=None):
         self.project = project
+        self.output = output
         self.env = dict(os.environ)
         self.env.update(RABBITMQ_USER="task5", RABBITMQ_VHOST="task5", TRIP_DB_NAME="swiftride_trip_test",
                         PAYMENT_DB_NAME="swiftride_payment_test", MATCH_DB_NAME="swiftride_matching_test",
@@ -75,12 +76,15 @@ class Stack:
             self.env_file = Path(empty.name)
 
     def run(self, command, timeout=120, env=None):
-        result = subprocess.run(command, cwd=ROOT, env=env or self.env, capture_output=True,
+        result = subprocess.run(command, cwd=ROOT, env=env or self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace", timeout=timeout)
-        output = result.stdout + result.stderr
+        output = result.stdout
         for secret in self.secrets:
             output = output.replace(secret, "[redacted]")
         if result.returncode:
+            if self.output:
+                with (self.output / "command-failure.log").open("a", encoding="utf-8") as log:
+                    log.write(output + "\n")
             raise RuntimeError(f"Command failed ({result.returncode}): {output[-5000:]}")
         return result.stdout.strip()
 
@@ -447,7 +451,7 @@ def main():
     parser.add_argument("--artifacts-path")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    stack = Stack("swiftride-task5-" + uuid.uuid4().hex[:10])
+    stack = Stack("swiftride-task5-" + uuid.uuid4().hex[:10], args.output)
     report = dict(project=stack.project, base_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                   working_tree="modified", started=dt.datetime.now(dt.timezone.utc).isoformat(), checks=[], status="running")
     def save():
@@ -484,7 +488,7 @@ def main():
         report["failure"] = str(error)
         if started:
             try:
-                logs = stack.compose("logs", "--no-color", "--tail", "80")
+                logs = stack.compose("logs", "--no-color", "--tail", "200")
                 for secret in stack.secrets:
                     logs = logs.replace(secret, "[redacted]")
                 (args.output / "services.log").write_text(logs, encoding="utf-8")
