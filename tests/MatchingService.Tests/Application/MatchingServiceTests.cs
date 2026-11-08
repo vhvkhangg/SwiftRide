@@ -62,6 +62,22 @@ public sealed class MatchingServiceTests
                 new MatchRequest("trip-001", 10, 106, 0), CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(double.NaN, 106)]
+    [InlineData(10, double.PositiveInfinity)]
+    public async Task MatchAsync_ThrowsForNonFiniteCoordinates(double latitude, double longitude)
+    {
+        var repository = new Mock<IDriverRepository>();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            new MatchingApplicationService(repository.Object).MatchAsync(
+                new MatchRequest("trip-001", latitude, longitude, 5), CancellationToken.None));
+
+        repository.Verify(item => item.FindNearbyAvailableAsync(
+            It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(),
+            It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static DriverLocation Driver(string id, double longitude, double latitude, DateTime updatedAt) =>
         new()
         {

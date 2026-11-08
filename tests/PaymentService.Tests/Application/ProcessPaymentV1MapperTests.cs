@@ -67,6 +67,16 @@ public sealed class ProcessPaymentV1MapperTests
     }
 
     [Fact]
+    public void CorrelationIdDifferentFromTripId_ShouldReject()
+    {
+        var message = NewMessage();
+        message.CorrelationId = Guid.NewGuid();
+
+        Assert.Throws<ArgumentException>(
+            () => ProcessPaymentV1Mapper.ToRequest(message));
+    }
+
+    [Fact]
     public void InvalidPayerAccount_ShouldReject()
     {
         var message = NewMessage();

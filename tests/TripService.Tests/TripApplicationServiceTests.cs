@@ -296,7 +296,8 @@ public class TripApplicationServiceTests
             CorrelationId = tripId,
             PaymentId = Guid.NewGuid(),
             Amount = 50000,
-            Currency = "VND"
+            Currency = "VND",
+            OccurredAtUtc = DateTimeOffset.UtcNow
         };
 
         await _service.HandlePaymentSucceededAsync(lateSuccessEvent, CancellationToken.None);

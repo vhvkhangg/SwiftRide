@@ -59,7 +59,14 @@ public sealed class PaymentRecoveryTests
             Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
         var command = new ProcessPaymentV1
         {
-            TripId = trip.Id, CorrelationId = trip.Id, IdempotencyKey = $"trip-{trip.Id:N}-payment-v1"
+            TripId = trip.Id,
+            CorrelationId = trip.Id,
+            Amount = 50_000,
+            Currency = "VND",
+            IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
+            PayerAccount = $"rider-{trip.RiderId:D}",
+            PayeeAccount = $"driver-{trip.DriverId!.Value:D}",
+            OccurredAtUtc = DateTimeOffset.UtcNow
         };
         var ct = TestContext.Current.CancellationToken;
         await service.HandlePaymentFaultAsync(command, ct);
@@ -89,5 +96,73 @@ public sealed class PaymentRecoveryTests
             Assert.Equal(TripStatus.Paid, trip.Status);
         }
         writer.Verify(item => item.SaveAsync(trip, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Theory]
+    [InlineData("amount")]
+    [InlineData("precision")]
+    [InlineData("currency")]
+    [InlineData("timestamp")]
+    [InlineData("payer")]
+    [InlineData("payee")]
+    public async Task MalformedTechnicalFault_ShouldNotChangeTrip(string invalidField)
+    {
+        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 50_000);
+        trip.ConfirmPrice(); trip.AcceptByDriver(Guid.NewGuid()); trip.StartEnRoute();
+        trip.Pickup(); trip.Dropoff(); trip.MarkPaymentPending();
+        var reader = new Mock<ITripReader>();
+        reader.Setup(item => item.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>())).ReturnsAsync(trip);
+        var writer = new Mock<ITripWriter>();
+        var service = new TripApplicationService(writer.Object, reader.Object,
+            Mock.Of<ITripWorkflowRepository>(), Mock.Of<ITripUnitOfWork>(), Mock.Of<ITripNotifier>(),
+            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+
+        var command = new ProcessPaymentV1
+        {
+            TripId = trip.Id,
+            CorrelationId = trip.Id,
+            Amount = 50_000,
+            Currency = "VND",
+            PayerAccount = $"rider-{trip.RiderId:D}",
+            PayeeAccount = $"driver-{trip.DriverId!.Value:D}",
+            OccurredAtUtc = DateTimeOffset.UtcNow,
+            IdempotencyKey = $"trip-{trip.Id:N}-payment-v1"
+        };
+        switch (invalidField)
+        {
+            case "amount": command.Amount = 0; break;
+            case "precision": command.Amount = 50_000.001m; break;
+            case "currency": command.Currency = "USD"; break;
+            case "timestamp": command.OccurredAtUtc = default; break;
+            case "payer": command.PayerAccount = "rider-invalid"; break;
+            case "payee": command.PayeeAccount = "driver-invalid"; break;
+        }
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.HandlePaymentFaultAsync(command, TestContext.Current.CancellationToken));
+        Assert.Equal(TripStatus.PaymentPending, trip.Status);
+        Assert.Null(trip.PaymentFailureReason);
+        writer.Verify(item => item.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SuccessWithoutTimestamp_ShouldRejectBeforeLoadingTrip()
+    {
+        var reader = new Mock<ITripReader>();
+        var writer = new Mock<ITripWriter>();
+        var service = new TripApplicationService(writer.Object, reader.Object,
+            Mock.Of<ITripWorkflowRepository>(), Mock.Of<ITripUnitOfWork>(), Mock.Of<ITripNotifier>(),
+            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+        var tripId = Guid.NewGuid();
+        var result = new PaymentSucceededV1
+        {
+            TripId = tripId, CorrelationId = tripId, PaymentId = Guid.NewGuid(), Amount = 50_000,
+            Currency = "VND"
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.HandlePaymentSucceededAsync(result, TestContext.Current.CancellationToken));
+        reader.Verify(item => item.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        writer.Verify(item => item.SaveAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

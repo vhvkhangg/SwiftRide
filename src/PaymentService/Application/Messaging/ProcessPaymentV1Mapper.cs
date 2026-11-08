@@ -23,6 +23,13 @@ public static class ProcessPaymentV1Mapper
                 nameof(message));
         }
 
+        if (message.CorrelationId != message.TripId)
+        {
+            throw new ArgumentException(
+                "CorrelationId phải trùng TripId.",
+                nameof(message));
+        }
+
         var expectedKey = $"trip-{message.TripId:N}-payment-v1";
 
         if (!string.Equals(

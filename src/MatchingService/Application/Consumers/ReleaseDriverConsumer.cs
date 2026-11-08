@@ -9,9 +9,10 @@ public sealed class ReleaseDriverConsumer(IDriverRepository repository) : IConsu
     public async Task Consume(ConsumeContext<ReleaseDriverV1> context)
     {
         var command = context.Message;
-        if (command.TripId == Guid.Empty || command.CorrelationId != command.TripId)
+        if (command.TripId == Guid.Empty || command.CorrelationId != command.TripId ||
+            command.DriverId == Guid.Empty || command.Attempt < 1)
             throw new ArgumentException("Invalid reservation release command.");
-        await repository.ReleaseReservationAsync(command.DriverId == Guid.Empty ? "" : command.DriverId.ToString("D"),
-            command.TripId, null, context.CancellationToken);
+        await repository.ReleaseReservationAsync(command.DriverId.ToString("D"),
+            command.TripId, command.Attempt, context.CancellationToken);
     }
 }

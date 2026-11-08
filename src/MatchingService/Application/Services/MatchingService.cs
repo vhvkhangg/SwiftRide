@@ -14,9 +14,10 @@ public sealed class MatchingService(IDriverRepository repository) : IMatchingSer
     {
         if (string.IsNullOrWhiteSpace(request.TripId))
             throw new ArgumentException("Mã chuyến đi (TripId) là bắt buộc.", nameof(request));
-        if (request.PickupLatitude is < -90 or > 90 || request.PickupLongitude is < -180 or > 180)
+        if (!double.IsFinite(request.PickupLatitude) || !double.IsFinite(request.PickupLongitude) ||
+            request.PickupLatitude is < -90 or > 90 || request.PickupLongitude is < -180 or > 180)
             throw new ArgumentOutOfRangeException(nameof(request), "Tọa độ điểm đón không hợp lệ.");
-        if (request.RadiusKm <= 0)
+        if (!double.IsFinite(request.RadiusKm) || request.RadiusKm <= 0)
             throw new ArgumentOutOfRangeException(nameof(request), "Bán kính (RadiusKm) phải lớn hơn 0.");
 
         var drivers = await repository.FindNearbyAvailableAsync(
@@ -51,19 +52,16 @@ public sealed class MatchingService(IDriverRepository repository) : IMatchingSer
         if (request.ExcludedDriverIds is null)
             throw new ArgumentException("ExcludedDriverIds không được để trống.", nameof(request));
 
-        var existingReservation = await repository.FindReservationAsync(
-            request.TripId,
-            request.Attempt,
-            cancellationToken);
-        if (existingReservation is not null)
-            return ToMatchedDriver(existingReservation, 0);
-
         var excluded = request.ExcludedDriverIds.Select(id =>
         {
             if (id == Guid.Empty)
                 throw new ArgumentException("ExcludedDriverIds không được chứa GUID rỗng.", nameof(request));
             return id.ToString("D");
         }).ToList();
+        var existingReservation = await repository.FindReservationAsync(
+            request.TripId, request.Attempt, cancellationToken);
+        if (existingReservation is not null)
+            return ToMatchedDriver(existingReservation, 0);
         for (var retry = 0; retry < 16; retry++)
         {
             var result = await repository.FindNearestAvailableAsync(
@@ -79,7 +77,7 @@ public sealed class MatchingService(IDriverRepository repository) : IMatchingSer
                 return concurrent is null ? null : ToMatchedDriver(concurrent, 0);
             }
             if (!Guid.TryParse(result.Value.Driver.DriverId, out var driverId) || driverId == Guid.Empty)
-                return null;
+                throw new InvalidOperationException("Matching DB chứa DriverId không hợp lệ.");
 
             var reserved = await repository.TryReserveAsync(
                 result.Value.Driver.DriverId,
