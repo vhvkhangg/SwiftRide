@@ -203,6 +203,138 @@ public sealed class TripOutboxModelTests
         Assert.Equal(1, await verify.Trips.CountAsync(item => item.IdempotencyKey == request.IdempotencyKey, ct));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "Integration")]
+    public async Task ConcurrentInvitations_KeepOneOwner(bool sameDriver)
+    {
+        await using var database = await TestDatabase.OpenAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 50000, 10.77, 106.7);
+        trip.ConfirmPrice();
+        trip.BeginMatchingAttempt(3);
+        await using (var seed = new TripDbContext(database.Options))
+        {
+            seed.Trips.Add(trip);
+            await seed.SaveChangesAsync(ct);
+        }
+        var firstDriver = Guid.NewGuid();
+        async Task<bool> Invite(Guid driver)
+        {
+            await using var db = new TripDbContext(database.Options);
+            try
+            {
+                return await new TripWorkflowRepository(db).AddInvitationAsync(new DriverInvitation
+                {
+                    TripId = trip.Id, DriverId = driver, Attempt = 1,
+                    ExpiresAtUtc = DateTime.UtcNow.AddMinutes(2)
+                }, ct);
+            }
+            catch (InvalidOperationException) when (!sameDriver) { return false; }
+        }
+        var results = await Task.WhenAll(Invite(firstDriver), Invite(sameDriver ? firstDriver : Guid.NewGuid()));
+        Assert.Single(results, result => result);
+        await using var verify = new TripDbContext(database.Options);
+        Assert.Single(await verify.DriverInvitations.ToListAsync(ct));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "Integration")]
+    public async Task AcceptRace_WithAcceptOrCancel_LeavesConsistentState(bool cancel)
+    {
+        await using var database = await TestDatabase.OpenAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var driver = Guid.NewGuid();
+        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 50000, 10.77, 106.7);
+        trip.ConfirmPrice();
+        trip.BeginMatchingAttempt(3);
+        await using (var seed = new TripDbContext(database.Options))
+        {
+            seed.Trips.Add(trip);
+            seed.DriverInvitations.Add(new DriverInvitation
+            {
+                TripId = trip.Id, DriverId = driver, Attempt = 1,
+                ExpiresAtUtc = DateTime.UtcNow.AddMinutes(2)
+            });
+            await seed.SaveChangesAsync(ct);
+        }
+        var loaded = 0;
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<bool> Mutate(bool cancelling)
+        {
+            await using var db = new TripDbContext(database.Options);
+            var repository = new TripRepository(db);
+            var reader = new Mock<SwiftRide.TripService.Domain.Interfaces.ITripReader>();
+            reader.Setup(item => item.GetByIdAsync(trip.Id, It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    var snapshot = await repository.GetByIdAsync(trip.Id, ct);
+                    if (Interlocked.Increment(ref loaded) == 2) ready.SetResult();
+                    await ready.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
+                    return snapshot;
+                });
+            var service = new TripApplicationService(repository, reader.Object, new TripWorkflowRepository(db),
+                new TripUnitOfWork(db), Mock.Of<ITripNotifier>(), Mock.Of<IMatchingPricingClient>(),
+                Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+            try
+            {
+                if (cancelling) await service.CancelAsync(trip.Id, ct);
+                else await service.DriverAcceptAsync(trip.Id, new DriverAcceptRequest(driver), ct);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException) { return false; }
+            catch (InvalidOperationException) { return false; }
+        }
+        var results = await Task.WhenAll(Mutate(false), Mutate(cancel));
+        Assert.Single(results, result => result);
+        await using var verify = new TripDbContext(database.Options);
+        var stored = await verify.Trips.SingleAsync(ct);
+        var invitation = await verify.DriverInvitations.SingleAsync(ct);
+        if (stored.Status == TripStatus.DriverAccepted)
+        {
+            Assert.Equal(driver, stored.DriverId);
+            Assert.True(invitation.IsResolved);
+        }
+        else
+        {
+            Assert.True(cancel);
+            Assert.Equal(TripStatus.Cancelled, stored.Status);
+            Assert.Null(stored.DriverId);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task AcceptExpiredInvitation_DoesNotChangeTrip()
+    {
+        await using var database = await TestDatabase.OpenAsync();
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = new TripDbContext(database.Options);
+        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 50000, 10.77, 106.7);
+        trip.ConfirmPrice();
+        trip.BeginMatchingAttempt(3);
+        var driver = Guid.NewGuid();
+        db.Trips.Add(trip);
+        db.DriverInvitations.Add(new DriverInvitation
+        {
+            TripId = trip.Id, DriverId = driver, Attempt = 1,
+            ExpiresAtUtc = DateTime.UtcNow.AddSeconds(-1)
+        });
+        await db.SaveChangesAsync(ct);
+        var repository = new TripRepository(db);
+        var service = new TripApplicationService(repository, repository, new TripWorkflowRepository(db),
+            new TripUnitOfWork(db), Mock.Of<ITripNotifier>(), Mock.Of<IMatchingPricingClient>(),
+            Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.DriverAcceptAsync(trip.Id, new DriverAcceptRequest(driver), ct));
+        await using var verify = new TripDbContext(database.Options);
+        Assert.Equal(TripStatus.PriceConfirmed, (await verify.Trips.SingleAsync(ct)).Status);
+        Assert.False((await verify.DriverInvitations.SingleAsync(ct)).IsResolved);
+    }
+
     private sealed class TestDatabase(string connectionString, string schema) : IAsyncDisposable
     {
         public DbContextOptions<TripDbContext> Options => new DbContextOptionsBuilder<TripDbContext>()

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Domain.Entities;
 
@@ -36,7 +37,20 @@ public sealed class TripWorkflowRepository(TripDbContext db) : ITripWorkflowRepo
         }
 
         db.DriverInvitations.Add(invitation);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+            { SqlState: "23505", ConstraintName: "IX_DriverInvitations_TripId_Attempt" or "PK_DriverInvitations" })
+        {
+            db.Entry(invitation).State = EntityState.Detached;
+            var owner = await db.DriverInvitations.AsNoTracking().SingleAsync(item =>
+                item.TripId == invitation.TripId && item.Attempt == invitation.Attempt, ct);
+            if (owner.DriverId != invitation.DriverId)
+                throw new InvalidOperationException("Matching attempt already has another driver.");
+            return false;
+        }
         return true;
     }
 
