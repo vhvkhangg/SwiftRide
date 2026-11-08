@@ -84,7 +84,7 @@ docker compose logs -f api-gateway
 pwsh -File tests/Gateway.Security/gateway-security.ps1
 ~~~
 
-Compose bật DevelopmentAccounts và EnsureCreated cho Auth. Trip/Payment dùng Database:Migrate=true để áp dụng migrations khi khởi động local. Production áp dụng migration bằng deployment job, tắt auto-migrate/seed và thiết lập secrets/TLS/network policy.
+Compose bật DevelopmentAccounts và giữ EnsureCreated cho database local legacy. Database Auth mới nên dùng `AUTH_DB_MIGRATE=true` và `AUTH_DB_ENSURE_CREATED=false`; overlay kiểm thử Task 1 đã bật hai giá trị này. Trip/Payment dùng Database:Migrate=true. Production nên chạy migration bằng deployment job riêng, tắt auto-migrate/seed và thiết lập secrets/TLS/network policy.
 
 PostgreSQL Auth local: localhost:5435, database swiftride_auth, username swiftride, password AUTH_DB_PASSWORD. Trip:5433, Payment:5434, Mongo:27017.
 
@@ -98,9 +98,21 @@ $env:ServiceAuth__SecretKey = "<different-generated-internal-key>"
 dotnet run --project src/TripService --urls http://localhost:5101
 ~~~
 
-Đặt Database__Migrate=true khi cần áp dụng migrations local. Gateway Auth với database mới có thể bật AuthDatabase__EnsureCreated=true trong Development. EnsureCreated không nâng cấp schema cũ, không kết hợp với migrations trên cùng database.
+Đặt `AuthDatabase__Migrate=true` và `Database__Migrate=true` khi cần áp dụng migrations local. `AuthDatabase__EnsureCreated` chỉ giữ cho bootstrap legacy database mới trong Development; không bật cùng migration trên cùng database.
 
 Migration DriverInvitationsAndConcurrency thêm bảng invitation và mapping xmin của PostgreSQL. Không xóa volume/database cũ để nâng cấp; áp dụng migration Trip.
+
+### Auth migrations
+
+Database Auth mới có thể chạy `dotnet ef database update --project src/ApiGateway --context AuthDbContext` với connection string và secrets đã cấu hình, hoặc bật `AuthDatabase__Migrate=true`. Chạy lại không tạo bảng hoặc migration history trùng. `GET /health` là liveness; `GET /health/ready` kiểm tra truy vấn được cả Users và RefreshTokens, trả 503 nếu database/schema chưa sẵn sàng.
+
+Database Auth cũ tạo bằng EnsureCreated chưa có migration history. Không bật Migrate trực tiếp: initial migration sẽ từ chối tạo lại bảng, không tự xóa hoặc sửa dữ liệu. Sao lưu bằng pg_dump, tạo SQL bằng `dotnet ef migrations script --project src/ApiGateway --context AuthDbContext`, đối chiếu schema thực tế và nhờ người vận hành review/baseline migration `20261108052137_InitialAuthSchema` trước khi chuyển sang migrations. Không tự ghi history khi chưa đối chiếu, không xóa volume để vượt lỗi.
+
+### Task 1 acceptance
+
+Chạy từ repo root: `pwsh -NoProfile -File tests/Gateway.Security/task1.ps1`. Runner tạo Compose project riêng, dùng loopback ports 15100-15103 và database test riêng; không chạy trên production hoặc khi ports này đang được dùng. Mặc định gỡ containers/network sau khi chạy, giữ volumes. `-KeepRunning` giữ stack để chẩn đoán.
+
+Runner kiểm tra initial migration và restart không tạo history trùng, refresh token còn dùng được sau restart Gateway, readiness 503 khi Auth PostgreSQL dừng, auth rotation/replay/logout/concurrency, rate limit 20 requests/phút, rồi luồng Trip/Matching/Payment thật qua Gateway và SignalR recipient isolation. Gateway được restart giữa các suite để reset cửa sổ rate limit, không tắt rate limiting. Workflow CI chạy runner sau system recovery suite; kết quả local không đồng nghĩa GitHub CI đã chạy.
 
 ## Kiểm chứng
 

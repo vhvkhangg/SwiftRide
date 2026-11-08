@@ -80,6 +80,7 @@ app.MapTripEndpoints();
 app.MapHub<SwiftRide.TripService.Api.TripNotificationHub>("/hubs/trips",
     options => options.CloseOnAuthenticationExpiration = true);
 
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 

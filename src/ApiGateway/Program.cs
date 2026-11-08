@@ -87,9 +87,30 @@ app.MapWhen(context => context.Request.Path.StartsWithSegments("/auth") ||
         endpoints.MapControllers();
         endpoints.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "ok" }))
             .AllowAnonymous();
+        endpoints.MapGet("/health/ready", async (AuthDbContext db, CancellationToken ct) =>
+        {
+            try
+            {
+                await db.Users.AsNoTracking().Select(user => user.Id).Take(1).ToListAsync(ct);
+                await db.RefreshTokens.AsNoTracking().Select(token => token.Id).Take(1).ToListAsync(ct);
+                return Results.Ok(new { service = "api-gateway", status = "ready" });
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }).AllowAnonymous();
     });
 });
-// Development bootstrap only. Production uses reviewed EF migrations.
+if (builder.Configuration.GetValue<bool>("AuthDatabase:Migrate") &&
+    builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
+    throw new InvalidOperationException("AuthDatabase:Migrate and EnsureCreated cannot both be enabled.");
+if (builder.Configuration.GetValue<bool>("AuthDatabase:Migrate"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
+}
+
 if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
 {
     await using var scope = app.Services.CreateAsyncScope();
