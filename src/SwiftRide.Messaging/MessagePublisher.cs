@@ -1,6 +1,7 @@
 using MassTransit;
 using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Payments;
+using Microsoft.Extensions.Logging;
 
 namespace SwiftRide.Messaging;
 
@@ -8,11 +9,13 @@ public class MessagePublisher : ITripMessageBus
 {
     private readonly IPublishEndpoint _publisher;
     private readonly ISendEndpointProvider _sender;
+    private readonly ILogger<MessagePublisher> _logger;
 
-    public MessagePublisher(IPublishEndpoint publisher, ISendEndpointProvider sender)
+    public MessagePublisher(IPublishEndpoint publisher, ISendEndpointProvider sender, ILogger<MessagePublisher> logger)
     {
         _publisher = publisher;
         _sender = sender;
+        _logger = logger;
     }
 
     // Publish: thông báo event cho mọi queue đã đăng ký nhận loại event đó.
@@ -34,7 +37,13 @@ public class MessagePublisher : ITripMessageBus
     {
         var address = new Uri("queue:" + MessagingEndpoints.PaymentProcessPayment);
         var endpoint = await _sender.GetSendEndpoint(address);
-        await endpoint.Send(message, cancellationToken);
+        await endpoint.Send(message, context =>
+        {
+            context.MessageId = NewId.NextGuid();
+            context.CorrelationId = message.CorrelationId;
+            _logger.LogInformation("Staging payment command. TripId={TripId}, CorrelationId={CorrelationId}, MessageId={MessageId}, IdempotencyKey={IdempotencyKey}",
+                message.TripId, message.CorrelationId, context.MessageId, message.IdempotencyKey);
+        }, cancellationToken);
     }
 
     public async Task SendFindDriverAsync(
@@ -43,7 +52,42 @@ public class MessagePublisher : ITripMessageBus
     {
         var address = new Uri("queue:" + MessagingEndpoints.MatchingFindDriverForTrip);
         var endpoint = await _sender.GetSendEndpoint(address);
-        await endpoint.Send(message, cancellationToken);
+        await endpoint.Send(message, context =>
+        {
+            context.MessageId = NewId.NextGuid();
+            context.CorrelationId = message.CorrelationId;
+            _logger.LogInformation("Staging matching command. TripId={TripId}, CorrelationId={CorrelationId}, MessageId={MessageId}, Attempt={Attempt}",
+                message.TripId, message.CorrelationId, context.MessageId, message.Attempt);
+        }, cancellationToken);
     }
 
+    public Task ConfirmDriverReservationAsync(
+        Guid driverId,
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken = default) =>
+        _publisher.Publish(new DriverReservationConfirmedV1
+        {
+            CorrelationId = tripId,
+            TripId = tripId,
+            DriverId = driverId,
+            Attempt = attempt,
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+    public Task ReleaseDriverAsync(
+        Guid driverId,
+        Guid tripId,
+        int attempt,
+        string reason,
+        CancellationToken cancellationToken = default) =>
+        _publisher.Publish(new DriverReservationReleasedV1
+        {
+            CorrelationId = tripId,
+            TripId = tripId,
+            DriverId = driverId,
+            Attempt = attempt,
+            Reason = reason,
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        }, cancellationToken);
 }

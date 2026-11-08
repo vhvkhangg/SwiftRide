@@ -1,5 +1,7 @@
 # Checklist triển khai và bàn giao NV6 — RabbitMQ + MassTransit
 
+Checklist lịch sử NV6; không dùng các mục chưa cập nhật để kết luận trạng thái Task 5. Xem [runbook hiện tại](messaging.md) và [kết quả Task 5](task5-results.md).
+
 Ngày lập: 14/10/2026. Workspace: `D:\SwiftRide`.
 
 Đây là checklist thực hiện, không phải báo cáo đã triển khai. Chỉ đánh dấu một mục khi có file tương ứng và bằng chứng kiểm tra. Các đường dẫn dưới đây tính từ gốc repository. Tên file mới là cấu trúc đề xuất.

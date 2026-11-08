@@ -208,6 +208,7 @@ services:
       Routes__9__UpstreamPathTemplate: /api/hubs/trips/{everything}
       Routes__9__UpstreamHttpMethod__0: GET
       Routes__9__UpstreamHttpMethod__1: POST
+      Routes__9__UpstreamHttpMethod__2: DELETE
       Routes__9__DownstreamPathTemplate: /hubs/trips/{everything}
       Routes__9__DownstreamScheme: http
       Routes__9__DownstreamHostAndPorts__0__Host: trip-service

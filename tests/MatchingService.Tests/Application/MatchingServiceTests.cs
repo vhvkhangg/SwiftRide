@@ -17,8 +17,8 @@ public sealed class MatchingServiceTests
         repository
             .Setup(item => item.FindNearbyAvailableAsync(10.7769, 106.7009, 5, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync([
-                (Driver("driver-near", 106.7010, 10.7770, updatedAt), 0.02),
-                (Driver("driver-far", 106.7100, 10.7800, updatedAt), 1.25)
+                (Driver("00000000-0000-4000-8000-000000000001", 106.7010, 10.7770, updatedAt), 0.02),
+                (Driver("00000000-0000-4000-8000-000000000002", 106.7100, 10.7800, updatedAt), 1.25)
             ]);
 
         var result = await new MatchingApplicationService(repository.Object).MatchAsync(
@@ -27,8 +27,8 @@ public sealed class MatchingServiceTests
         Assert.Equal("trip-001", result.TripId);
         Assert.Collection(
             result.Drivers,
-            driver => Assert.Equal("driver-near", driver.DriverId),
-            driver => Assert.Equal("driver-far", driver.DriverId));
+            driver => Assert.Equal("00000000-0000-4000-8000-000000000001", driver.DriverId),
+            driver => Assert.Equal("00000000-0000-4000-8000-000000000002", driver.DriverId));
         Assert.Equal(0.02, result.Drivers[0].DistanceKm);
         repository.Verify(item => item.FindNearbyAvailableAsync(
             10.7769, 106.7009, 5, 10, It.IsAny<CancellationToken>()), Times.Once);

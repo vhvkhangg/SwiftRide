@@ -26,7 +26,8 @@ public sealed class TripUnitOfWork(TripDbContext db) : ITripUnitOfWork
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None);
+            try { await transaction.RollbackAsync(CancellationToken.None); }
+            finally { db.ChangeTracker.Clear(); }
             throw;
         }
     }

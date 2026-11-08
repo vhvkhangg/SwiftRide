@@ -9,12 +9,51 @@ using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Infrastructure.Repositories;
 using Xunit;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace SwiftRide.PaymentService.Tests.Integration;
 
 [Collection("Payment database")]
 public sealed class PaymentMessagingIntegrationTests
 {
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task UpgradeInitialSchema_PreservesPaymentAndCanRunTwice()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await CreateOptionsAsync(ct);
+        var connectionString = Environment.GetEnvironmentVariable("SWIFTRIDE_PAYMENT_TEST_DB")!;
+        var schema = "task5_" + Guid.NewGuid().ToString("N");
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var create = new NpgsqlCommand($"CREATE SCHEMA {schema}", connection);
+        await create.ExecuteNonQueryAsync(ct);
+        try
+        {
+            var options = new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(
+                new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema }.ConnectionString).Options;
+            await using var db = new PaymentDbContext(options);
+            await db.GetService<IMigrator>().MigrateAsync(db.Database.GetMigrations().First(), ct);
+            var paymentId = Guid.NewGuid();
+            var tripId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO payments (id,trip_id,amount,status,idempotency_key,created_at,updated_at)
+                VALUES ({paymentId},{tripId},100,'Failed','legacy-payment',now(),now())
+                """, ct);
+            await db.Database.MigrateAsync(ct);
+            await db.Database.MigrateAsync(ct);
+            var payment = await db.Payments.SingleAsync(item => item.Id == paymentId, ct);
+            Assert.Equal(tripId, payment.TripId);
+            Assert.Equal(100, payment.Amount);
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP SCHEMA {schema} CASCADE", connection);
+            await drop.ExecuteNonQueryAsync(ct);
+        }
+    }
+
     private static async Task<DbContextOptions<PaymentDbContext>>
         CreateOptionsAsync(CancellationToken ct)
     {

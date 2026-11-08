@@ -401,6 +401,47 @@ public sealed class PaymentApplicationServiceTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
+
+    [Fact]
+    public async Task GetByTripId_FailedPayment_ShouldReturnFailureDetails()
+    {
+        var tripId = Guid.NewGuid();
+        var key = $"trip-{tripId:N}-payment-v1";
+
+        var failed = Payment.Create(
+            tripId,
+            100_000m,
+            key,
+            $"rider-{Guid.NewGuid():D}",
+            $"driver-{Guid.NewGuid():D}");
+
+        failed.MarkFailed(
+            "PAYMENT_DECLINED",
+            "Thanh toán bị từ chối.");
+
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(
+                key,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(failed);
+
+        var response = await _service.GetPaymentByTripIdAsync(
+            tripId,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(response);
+        Assert.Equal(failed.Id, response.Id);
+        Assert.Equal("Failed", response.Status);
+        Assert.Equal("PAYMENT_DECLINED", response.FailureCode);
+        Assert.Equal(
+            "Thanh toán bị từ chối.",
+            response.FailureReason);
+
+        _repo.Verify(x => x.GetSettledByTripIdAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+
     [Fact]
     public async Task Refund_InvalidLedger_ShouldReject()
     {

@@ -3,6 +3,16 @@ using MassTransit.EntityFrameworkCoreIntegration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql;
+using Microsoft.Extensions.Options;
+using Moq;
+using SwiftRide.Messaging;
+using SwiftRide.TripService.Application.DTOs;
+using SwiftRide.TripService.Application.Interfaces;
+using SwiftRide.TripService.Application.Services;
+using SwiftRide.TripService.Infrastructure.Repositories;
 using SwiftRide.TripService.Domain.Entities;
 using SwiftRide.TripService.Domain.Enums;
 using SwiftRide.TripService.Infrastructure;
@@ -48,13 +58,11 @@ public sealed class TripOutboxModelTests
     // ---------------------------------------------------------------------------
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task UnitOfWork_PersistsTripStateAndOutboxMessageConsistentlyInSameTransaction()
     {
-        var dbRoot = new InMemoryDatabaseRoot();
-        var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseInMemoryDatabase($"outbox-persist-{Guid.NewGuid()}", dbRoot)
-            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
+        await using var database = await TestDatabase.OpenAsync();
+        var options = database.Options;
 
         await using var db = new TripDbContext(options);
         var unitOfWork = new TripUnitOfWork(db);
@@ -100,13 +108,11 @@ public sealed class TripOutboxModelTests
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task UnitOfWork_RollsBackBothTripStateAndOutboxMessageWhenErrorOccurs()
     {
-        var dbRoot = new InMemoryDatabaseRoot();
-        var options = new DbContextOptionsBuilder<TripDbContext>()
-            .UseInMemoryDatabase($"outbox-rollback-{Guid.NewGuid()}", dbRoot)
-            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
+        await using var database = await TestDatabase.OpenAsync();
+        var options = database.Options;
 
         await using var db = new TripDbContext(options);
         var unitOfWork = new TripUnitOfWork(db);
@@ -129,8 +135,8 @@ public sealed class TripOutboxModelTests
                     EnqueueTime = DateTime.UtcNow
                 });
 
-                await Task.CompletedTask;
-                throw new InvalidOperationException("Lỗi hệ thống bất ngờ!");
+                await db.SaveChangesAsync(ct);
+                throw new InvalidOperationException("Injected failure after SaveChanges.");
             }, TestContext.Current.CancellationToken);
         });
 
@@ -145,5 +151,93 @@ public sealed class TripOutboxModelTests
 
         Assert.Null(savedTrip);
         Assert.Null(savedOutboxMessage);
+        Assert.Empty(db.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task UpgradeFromInitialSchema_PreservesRows_AndCanRunTwice()
+    {
+        await using var database = await TestDatabase.OpenAsync(migrate: false);
+        await using var db = new TripDbContext(database.Options);
+        var migrator = db.GetService<IMigrator>();
+        var ct = TestContext.Current.CancellationToken;
+        await migrator.MigrateAsync(db.Database.GetMigrations().First(), ct);
+        var tripId = Guid.NewGuid();
+        var riderId = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Trips" ("Id", "RiderId", "PickupAddress", "DropoffAddress", "Status", "CreatedAt")
+            VALUES ({tripId}, {riderId}, 'old pickup', 'old dropoff', 'Requested', now())
+            """, ct);
+        await db.Database.MigrateAsync(ct);
+        await db.Database.MigrateAsync(ct);
+        var trip = await db.Trips.SingleAsync(item => item.Id == tripId, ct);
+        Assert.Equal(riderId, trip.RiderId);
+        Assert.Equal("old pickup", trip.PickupAddress);
+        Assert.Null(trip.IdempotencyKey);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ConcurrentCreate_SameKeyAndPayload_ProducesOneTrip()
+    {
+        await using var database = await TestDatabase.OpenAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.77, 106.7, 5, 10,
+            IdempotencyKey: "task5-" + Guid.NewGuid().ToString("N"));
+        async Task<TripResponse> Create()
+        {
+            await using var db = new TripDbContext(database.Options);
+            var repository = new TripRepository(db);
+            var pricing = new Mock<IMatchingPricingClient>();
+            pricing.Setup(item => item.GetQuoteAsync(It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MatchingQuoteResponse(0, 50, 10, 0, 0, 0, 6, 66));
+            var service = new TripApplicationService(repository, repository, new TripWorkflowRepository(db),
+                new TripUnitOfWork(db), Mock.Of<ITripNotifier>(), pricing.Object, Mock.Of<ITripMessageBus>(),
+                Options.Create(new TripMatchingOptions()));
+            return await service.CreateAsync(request, ct);
+        }
+        var results = await Task.WhenAll(Create(), Create());
+        Assert.Equal(results[0].Id, results[1].Id);
+        await using var verify = new TripDbContext(database.Options);
+        Assert.Equal(1, await verify.Trips.CountAsync(item => item.IdempotencyKey == request.IdempotencyKey, ct));
+    }
+
+    private sealed class TestDatabase(string connectionString, string schema) : IAsyncDisposable
+    {
+        public DbContextOptions<TripDbContext> Options => new DbContextOptionsBuilder<TripDbContext>()
+            .UseNpgsql(new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema }.ConnectionString).Options;
+
+        public static async Task<TestDatabase> OpenAsync(bool migrate = true)
+        {
+            var connectionString = Environment.GetEnvironmentVariable("SWIFTRIDE_TRIP_TEST_DB");
+            Assert.SkipUnless(connectionString is not null || Environment.GetEnvironmentVariable("CI") == "true", "Set SWIFTRIDE_TRIP_TEST_DB.");
+            if (connectionString is null || new NpgsqlConnectionStringBuilder(connectionString).Database?.EndsWith("_test", StringComparison.Ordinal) != true)
+                throw new InvalidOperationException("Trip integration tests require an isolated _test database.");
+            var schema = "task5_" + Guid.NewGuid().ToString("N");
+            var database = new TestDatabase(connectionString, schema);
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand($"CREATE SCHEMA {schema}", connection);
+            await command.ExecuteNonQueryAsync();
+            try
+            {
+                if (migrate)
+                {
+                    await using var db = new TripDbContext(database.Options);
+                    await db.Database.MigrateAsync();
+                }
+                return database;
+            }
+            catch { await database.DisposeAsync(); throw; }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand($"DROP SCHEMA {schema} CASCADE", connection);
+            await command.ExecuteNonQueryAsync();
+        }
     }
 }

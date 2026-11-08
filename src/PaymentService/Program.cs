@@ -82,10 +82,9 @@ builder.Services.AddHttpClient<
 
 var app = builder.Build();
 
-// Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
 app.MapHealthChecks("/health/ready").AllowAnonymous();
 
-app.MapPaymentEndpoints(app.Environment.IsDevelopment());
+app.MapPaymentEndpoints();
 
 app.MapGet(
     "/health",

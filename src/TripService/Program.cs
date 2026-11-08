@@ -24,6 +24,8 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentSucceeded);
     consumers.AddConsumer<PaymentFailedConsumer>()
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentFailed);
+    consumers.AddConsumer<PaymentFaultConsumer>()
+        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentFault);
     consumers.AddEntityFrameworkOutbox<TripDbContext>(options =>
     {
         options.UsePostgres();
@@ -35,7 +37,7 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
         if (name is MessagingEndpoints.TripDriverFoundForTrip or
             MessagingEndpoints.TripNoDriverFoundForTrip or
             MessagingEndpoints.TripPaymentSucceeded or
-            MessagingEndpoints.TripPaymentFailed)
+            MessagingEndpoints.TripPaymentFailed or MessagingEndpoints.TripPaymentFault)
         {
             endpoint.UseEntityFrameworkOutbox<TripDbContext>(context);
         }

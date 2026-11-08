@@ -64,6 +64,7 @@ Desktop.ini
 *.temp
 *.bak
 *.swp
+__pycache__/
 *~
 
 # Gateway EF source is not a local database volume.

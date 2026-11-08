@@ -182,11 +182,29 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 nameof(tripId));
         }
 
-        var payment = await _payments.GetSettledByTripIdAsync(
-            tripId,
+        var canonicalKey = $"trip-{tripId:N}-payment-v1";
+
+        var payment = await _payments.GetByIdempotencyKeyAsync(
+            canonicalKey,
             cancellationToken);
 
-        return payment is null ? null : PaymentResponse.From(payment);
+        if (payment is not null)
+        {
+            if (payment.TripId != tripId)
+            {
+                throw new InvalidOperationException(
+                    "Payment có IdempotencyKey không khớp Trip.");
+            }
+
+            return PaymentResponse.From(payment);
+        }
+
+        var legacyPayment = await _payments.GetSettledByTripIdAsync(
+            tripId,
+            cancellationToken
+        );
+
+        return legacyPayment is null ? null : PaymentResponse.From(legacyPayment);
     }
 
     public async Task<PaymentResponse> ReconcilePaymentAsync(

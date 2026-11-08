@@ -1,0 +1,22 @@
+services:
+  rabbitmq:
+    ports: !override ["127.0.0.1::5672", "127.0.0.1::15672"]
+  trip-postgres:
+    ports: !override ["127.0.0.1::5432"]
+  payment-postgres:
+    ports: !override ["127.0.0.1::5432"]
+  auth-postgres:
+    ports: !override ["127.0.0.1::5432"]
+  matching-mongodb:
+    ports: !override ["127.0.0.1::27017"]
+  trip-service:
+    ports: !override ["127.0.0.1::8080"]
+    environment:
+      TripMatching__InvitationTimeoutSeconds: 30
+      TripMatching__MaxAttempts: 3
+  matching-service:
+    ports: !override ["127.0.0.1::8080"]
+  payment-service:
+    ports: !override ["127.0.0.1::8080"]
+  api-gateway:
+    ports: !override ["127.0.0.1::8080"]

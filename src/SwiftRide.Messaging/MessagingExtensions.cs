@@ -2,6 +2,7 @@ using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace SwiftRide.Messaging;
 
@@ -45,6 +46,8 @@ public static class MessagingExtensions
             options.ShutdownTimeout = TimeSpan.FromSeconds(35);
         });
 
+        services.AddLogging(logging => logging.AddJsonConsole(options => options.IncludeScopes = true));
+        services.AddScoped(typeof(MessageLogFilter<>));
         services.AddMassTransit(x =>
         {
             x.SetEndpointNameFormatter(new KebabCaseEndpointNameFormatter(
@@ -98,6 +101,7 @@ public static class MessagingExtensions
                 });
 
                 MessagingTopology.Configure(bus);
+                bus.UseConsumeFilter(typeof(MessageLogFilter<>), context);
                 if (configureBus != null)
                 {
                     configureBus(bus);

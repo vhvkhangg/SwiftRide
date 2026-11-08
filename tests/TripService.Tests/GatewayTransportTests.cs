@@ -125,7 +125,7 @@ public sealed class GatewayTransportTests
             }
             trips.Setup(service => service.GetByIdAsync(ownedTrip.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new TripResponse(ownedTrip.Id, rider, driver, "A", "B", 100,
-                    TripStatus.DriverAccepted, ownedTrip.CreatedAt, null));
+                    TripStatus.DriverAccepted, ownedTrip.CreatedAt, null, null));
             async Task Check(string path, string? token, HttpStatusCode expected, bool post = false)
             {
                 using var request = new HttpRequestMessage(post ? HttpMethod.Post : HttpMethod.Get, path);

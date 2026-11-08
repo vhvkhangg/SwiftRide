@@ -1,22 +1,39 @@
 using MongoDB.Driver;
+using MongoDB.Bson;
 using MongoDB.Driver.GeoJsonObjectModel;
 using SwiftRide.MatchingService.Domain.Interfaces;
 using SwiftRide.MatchingService.Domain.Models;
 
 namespace SwiftRide.MatchingService.Infrastructure.Repositories;
 
-public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRepository
+public sealed class MongoDriverRepository(IMongoDatabase database) : IDriverRepository
 {
     private static readonly TimeSpan DriverLocationValidity = TimeSpan.FromMinutes(10);
+    private static readonly BsonRegularExpression ValidDriverIdRegex =
+        new("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$");
+    private static readonly FilterDefinition<DriverLocation> ValidDriverIdFilter =
+        new BsonDocumentFilterDefinition<DriverLocation>(
+            new BsonDocument("DriverId", ValidDriverIdRegex));
 
     private readonly IMongoCollection<DriverLocation> collection =
-        mongoClient.GetDatabase("swiftride_matching").GetCollection<DriverLocation>("drivers");
+        database.GetCollection<DriverLocation>("drivers");
 
     public async Task EnsureIndexesAsync(CancellationToken cancellationToken)
     {
         var index = new CreateIndexModel<DriverLocation>(
             Builders<DriverLocation>.IndexKeys.Geo2DSphere(driver => driver.Location));
         await collection.Indexes.CreateOneAsync(index, cancellationToken: cancellationToken);
+        await collection.Indexes.CreateOneAsync(new CreateIndexModel<DriverLocation>(
+            Builders<DriverLocation>.IndexKeys.Ascending(driver => driver.DriverId),
+            new CreateIndexOptions { Unique = true }), cancellationToken: cancellationToken);
+        await collection.Indexes.CreateOneAsync(new CreateIndexModel<DriverLocation>(
+            Builders<DriverLocation>.IndexKeys.Ascending(driver => driver.ReservationTripId)
+                .Ascending(driver => driver.ReservationAttempt),
+            new CreateIndexOptions<DriverLocation>
+            {
+                Unique = true,
+                PartialFilterExpression = new BsonDocument("ReservationTripId", new BsonDocument("$type", "binData"))
+            }), cancellationToken: cancellationToken);
     }
 
     public async Task UpsertLocationAsync(
@@ -28,12 +45,31 @@ public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRep
         if (string.IsNullOrWhiteSpace(driverId))
             throw new ArgumentException("Mã tài xế (DriverId) là bắt buộc.", nameof(driverId));
 
+        var now = DateTime.UtcNow;
         var filter = Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId);
-        var update = Builders<DriverLocation>.Update
+        var locationUpdate = Builders<DriverLocation>.Update
             .Set(driver => driver.Location, location)
-            .Set(driver => driver.IsAvailable, isAvailable)
-            .Set(driver => driver.UpdatedAt, DateTime.UtcNow);
-        await collection.UpdateOneAsync(filter, update, new UpdateOptions { IsUpsert = true }, cancellationToken);
+            .Set(driver => driver.UpdatedAt, now);
+        await collection.UpdateOneAsync(filter, locationUpdate, new UpdateOptions { IsUpsert = true }, cancellationToken);
+
+        if (!isAvailable)
+        {
+            await collection.UpdateOneAsync(
+                filter,
+                Builders<DriverLocation>.Update.Set(driver => driver.IsAvailable, false),
+                cancellationToken: cancellationToken);
+            return;
+        }
+
+        var canBecomeAvailable = Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, null);
+        await collection.UpdateOneAsync(
+            Builders<DriverLocation>.Filter.And(filter, canBecomeAvailable),
+            Builders<DriverLocation>.Update
+                .Set(driver => driver.IsAvailable, true)
+                .Unset(driver => driver.ReservationTripId)
+                .Unset(driver => driver.ReservationAttempt)
+                .Unset(driver => driver.ReservationExpiresAtUtc),
+            cancellationToken: cancellationToken);
     }
 
     public async Task<IReadOnlyList<(DriverLocation Driver, double DistanceKm)>> FindNearbyAvailableAsync(
@@ -48,6 +84,7 @@ public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRep
         var filter = Builders<DriverLocation>.Filter.And(
             Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
             Builders<DriverLocation>.Filter.Gte(driver => driver.UpdatedAt, minimumUpdatedAt),
+            ValidDriverIdFilter,
             Builders<DriverLocation>.Filter.NearSphere(driver => driver.Location, point, radiusKm * 1000));
         var drivers = await collection.Find(filter).Limit(limit).ToListAsync(cancellationToken);
         return drivers
@@ -71,6 +108,8 @@ public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRep
         var filters = new List<FilterDefinition<DriverLocation>>
         {
             Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
+            Builders<DriverLocation>.Filter.Gte(driver => driver.UpdatedAt, DateTime.UtcNow - DriverLocationValidity),
+            ValidDriverIdFilter,
             Builders<DriverLocation>.Filter.NearSphere(driver => driver.Location, point, radiusKm * 1000)
         };
 
@@ -85,16 +124,128 @@ public sealed class MongoDriverRepository(IMongoClient mongoClient) : IDriverRep
         return (driver, Haversine(latitude, longitude, coordinates.Latitude, coordinates.Longitude));
     }
 
+    public async Task<DriverLocation?> FindReservationAsync(
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken)
+    {
+        return await collection.Find(Builders<DriverLocation>.Filter.And(
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt),
+                Builders<DriverLocation>.Filter.Or(
+                    Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationExpiresAtUtc, null),
+                    Builders<DriverLocation>.Filter.Gt(
+                        driver => driver.ReservationExpiresAtUtc,
+                        DateTime.UtcNow))))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<bool> TryReserveAsync(
+        string driverId,
+        Guid tripId,
+        int attempt,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var owner = Builders<DriverLocation>.Filter.And(
+            Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
+            Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt));
+        var available = Builders<DriverLocation>.Filter.And(
+            Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
+            Builders<DriverLocation>.Filter.Or(
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, null),
+                Builders<DriverLocation>.Filter.Lt(driver => driver.ReservationExpiresAtUtc, now)));
+        UpdateResult result;
+        try
+        {
+            result = await collection.UpdateOneAsync(
+                Builders<DriverLocation>.Filter.And(
+                    Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
+                    Builders<DriverLocation>.Filter.Or(owner, available)),
+                Builders<DriverLocation>.Update
+                    .Set(driver => driver.IsAvailable, false)
+                    .Set(driver => driver.ReservationTripId, tripId)
+                    .Set(driver => driver.ReservationAttempt, attempt)
+                    .Set(driver => driver.ReservationExpiresAtUtc, expiresAtUtc),
+                cancellationToken: cancellationToken);
+        }
+        catch (MongoWriteException exception) when (exception.WriteError.Category == ServerErrorCategory.DuplicateKey)
+        {
+            return false;
+        }
+        return result.ModifiedCount > 0 || result.MatchedCount > 0;
+    }
+
+    public async Task<bool> ReleaseReservationAsync(
+        string driverId,
+        Guid tripId,
+        int? attempt,
+        CancellationToken cancellationToken)
+    {
+        var filter = Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId);
+        if (!string.IsNullOrEmpty(driverId))
+            filter &= Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId);
+        if (attempt.HasValue)
+            filter &= Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt.Value);
+        var result = await collection.UpdateManyAsync(filter,
+            Builders<DriverLocation>.Update
+                .Set(driver => driver.IsAvailable, true)
+                .Unset(driver => driver.ReservationTripId)
+                .Unset(driver => driver.ReservationAttempt)
+                .Unset(driver => driver.ReservationExpiresAtUtc),
+            cancellationToken: cancellationToken);
+        return result.ModifiedCount > 0;
+    }
+
+    public async Task<IReadOnlyList<DriverLocation>> GetReservationsToReconcileAsync(CancellationToken cancellationToken) =>
+        await collection.Find(Builders<DriverLocation>.Filter.Ne(driver => driver.ReservationTripId, null) &
+                Builders<DriverLocation>.Filter.Lte(driver => driver.ReservationExpiresAtUtc, DateTime.UtcNow))
+            .SortBy(driver => driver.ReservationExpiresAtUtc).Limit(100).ToListAsync(cancellationToken);
+
+    public Task DeferReconciliationAsync(string driverId, Guid tripId, CancellationToken cancellationToken) =>
+        collection.UpdateOneAsync(
+            Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId) &
+            Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
+            Builders<DriverLocation>.Update.Set(driver => driver.ReservationExpiresAtUtc, DateTime.UtcNow.AddMinutes(2)),
+            cancellationToken: cancellationToken);
+    public async Task<bool> ConfirmReservationAsync(
+        string driverId,
+        Guid tripId,
+        int attempt,
+        CancellationToken cancellationToken)
+    {
+        var result = await collection.UpdateOneAsync(
+            Builders<DriverLocation>.Filter.And(
+                Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt)),
+            Builders<DriverLocation>.Update.Unset(driver => driver.ReservationExpiresAtUtc),
+            cancellationToken: cancellationToken);
+        return result.ModifiedCount > 0 || result.MatchedCount > 0;
+    }
+
     public async Task SetAvailabilityAsync(
         string driverId,
         bool isAvailable,
         CancellationToken cancellationToken)
     {
         var filter = Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId);
-        var update = Builders<DriverLocation>.Update
-            .Set(driver => driver.IsAvailable, isAvailable)
-            .Set(driver => driver.UpdatedAt, DateTime.UtcNow);
-        var result = await collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+        FilterDefinition<DriverLocation> availabilityFilter = filter;
+        if (isAvailable)
+        {
+            var now = DateTime.UtcNow;
+            availabilityFilter = Builders<DriverLocation>.Filter.And(
+                filter,
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, null));
+        }
+
+        var result = await collection.UpdateOneAsync(
+            availabilityFilter,
+            Builders<DriverLocation>.Update
+                .Set(driver => driver.IsAvailable, isAvailable)
+                .Set(driver => driver.UpdatedAt, DateTime.UtcNow),
+            cancellationToken: cancellationToken);
         if (result.MatchedCount == 0)
             throw new KeyNotFoundException($"Không tìm thấy vị trí tài xế '{driverId}'.");
     }

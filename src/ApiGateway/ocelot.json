@@ -146,7 +146,8 @@
       "UpstreamPathTemplate": "/api/hubs/trips/{everything}",
       "UpstreamHttpMethod": [
         "GET",
-        "POST"
+        "POST",
+        "DELETE"
       ],
       "DownstreamPathTemplate": "/hubs/trips/{everything}",
       "DownstreamScheme": "http",
