@@ -127,7 +127,18 @@ public sealed class TripApplicationService : ITripApplicationService
     private static string GeneratePayloadHash(CreateTripRequest request)
     {
         // Loại bỏ các trường không cấu thành sự khác biệt về payload nghiệp vụ (như IdempotencyKey)
-        var payloadForHash = new { request.RiderId, request.PickupAddress, request.DropoffAddress, request.Distance };
+        var payloadForHash = new
+        {
+            request.RiderId,
+            request.PickupAddress,
+            request.DropoffAddress,
+            request.PickupLatitude,
+            request.PickupLongitude,
+            request.Distance,
+            request.EstimatedTime,
+            request.RideType,
+            request.PromoCode
+        };
         using var sha256 = SHA256.Create();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payloadForHash));
         return Convert.ToBase64String(sha256.ComputeHash(bytes));
@@ -217,12 +228,13 @@ public sealed class TripApplicationService : ITripApplicationService
             if (invitation is null || invitation.Attempt != trip.MatchingAttempt)
                 throw new InvalidOperationException("Tài xế không có lời mời còn hiệu lực cho chuyến này.");
 
+            // Bắt buộc: Đánh dấu lời mời đã được giải quyết để Timeout Worker không quét lại và gây lỗi đồng thời
+            if (!await _workflow.ResolveInvitationAsync(
+                tripId, request.DriverId, trip.MatchingAttempt, DateTime.UtcNow, false, transactionCt))
+                throw new InvalidOperationException("Invitation expired or was already resolved.");
+
             trip.AcceptByDriver(request.DriverId);
             await _writer.SaveAsync(trip, transactionCt);
-
-            // Bắt buộc: Đánh dấu lời mời đã được giải quyết để Timeout Worker không quét lại và gây lỗi đồng thời
-            await _workflow.ResolveInvitationAsync(
-                tripId, request.DriverId, trip.MatchingAttempt, DateTime.UtcNow, false, transactionCt);
             await _messageBus.ConfirmDriverReservationAsync(
                 request.DriverId, trip.Id, trip.MatchingAttempt, transactionCt);
 

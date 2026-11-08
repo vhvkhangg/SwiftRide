@@ -16,8 +16,10 @@ Trip creation obtains an internal HTTP quote and persists `Requested`; it does n
 | `swiftride-trip-payment-succeeded` | Trip, PaymentSucceededV1 |
 | `swiftride-trip-payment-failed` | Trip, PaymentFailedV1 |
 | `swiftride-trip-payment-fault` | Trip, Fault of ProcessPaymentV1 |
+| `swiftride-matching-reservation-confirmed` | Matching, DriverReservationConfirmedV1 |
+| `swiftride-matching-reservation-released` | Matching, DriverReservationReleasedV1 |
 
-Messaging.Setup creates durable topology without consuming. Services register the eight business consumers. Legacy TripRequested/DriverMatched/DriverMatchFailed contracts are not the active workflow; existing legacy queues are not automatically deleted.
+Messaging.Setup creates durable topology without consuming. Services register ten active business consumers. Commands use direct Send; events use publish/fan-out. Legacy TripRequested/DriverMatched/DriverMatchFailed contracts are not the active workflow; existing legacy queues are not automatically deleted.
 
 Trip and Payment use PostgreSQL inbox/outbox transactions. Payment has a unique business key and unique settled Trip constraint; Trip creation has a unique nullable idempotency key. The full create payload must remain unchanged when retrying a key. Mongo has unique DriverId and unique non-null `(ReservationTripId, ReservationAttempt)` indexes. Index creation fails rather than deleting conflicting legacy data; inspect duplicates and reconcile ownership before upgrading.
 
@@ -31,7 +33,7 @@ docker compose ps -a
 docker compose logs --tail 100 messaging-setup trip-service matching-service payment-service
 ```
 
-Compose enables startup EF migrations for Trip/Payment, seeds Mongo pricing and enables development Auth/demo accounts. Gateway Auth still uses development-only EnsureCreated; it does not provide a production Auth schema-upgrade migration. Configure secrets from a protected environment before non-local use. Service `/health/ready` checks bus readiness, not full business correctness.
+Compose enables startup EF migrations for Trip/Payment, seeds Mongo pricing and enables development Auth/demo accounts. Base Compose keeps Auth EnsureCreated for existing development volumes. Task 1 supplies Auth EF migrations: on a new database set AUTH_DB_MIGRATE=true and AUTH_DB_ENSURE_CREATED=false; never enable both or run the initial migration over an existing EnsureCreated schema without a reviewed baseline/backup. Configure secrets from a protected environment before non-local use. Service `/health/ready` checks readiness, not full business correctness.
 
 Before upgrading existing volumes, back up both PostgreSQL databases and Mongo using the configured database/user names. Example for default local Trip DB:
 
@@ -102,7 +104,7 @@ python tests/System/messaging.py --dotnet dotnet
 
 The system command uses a fresh `swiftride-task5-*` project, unique random credentials, separate volumes/vhost/databases, random loopback ports, and ignores the development `.env`. It invokes PostgreSQL/Mongo integration tests with isolated `_test` connections; missing dependencies fail in CI rather than being silently skipped. PostgreSQL tests migrate old schemas containing data, and rollback tests fail after a real SaveChanges. Mongo tests cover concurrent ownership, duplicate attempts and heartbeat safety.
 
-System scenarios cover Paid, persisted decline delivery, reject/timeout/cancel, duplicate create/payment, late results, reconnect invitations, broker/database/service outages, commit/result gaps and error/replay. The decline scenario seeds a persisted failed payment, then uses the real consumer/broker/Trip path; it is not a real bank/PSP decline. Payment decision behavior is separately covered by application/database tests.
+System scenarios cover ten active queues, command Send topology, event fan-out to independent subscribers, persistent messages across broker restart, wrong-contract `_skipped` retention, invalid-command `_error` without retry, Paid, persisted decline delivery, reject/timeout/cancel, duplicate create/payment, late results, reconnect invitations, broker/database/service outages, commit/result gaps and error/replay. The decline scenario seeds a persisted failed payment, then uses the real consumer/broker/Trip path; it is not a real bank/PSP decline. Payment decision behavior is separately covered by application/database tests.
 
 Report: `artifacts/task5/system-current/report.json`. Failure additionally saves redacted service logs; exit status is nonzero. Containers/network stop by default, test volumes remain. `--keep-running` retains the test stack; credentials are intentionally not saved, so normally rerun with a fresh project. `--no-build` is only for unchanged images. Low disk: use `--output E:\SwiftRide-task5\report` and redirect .NET output with `--artifacts-path`; do not move or delete development database volumes.
 

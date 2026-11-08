@@ -134,7 +134,7 @@
         "GET"
       ],
       "DownstreamPathTemplate": "/hubs/trips",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "ws",
       "DownstreamHostAndPorts": [
         {
           "Host": "localhost",

@@ -79,7 +79,8 @@ public static class TripEndpoints
                 where invitation.DriverId == driverId &&
                     !invitation.IsResolved &&
                     invitation.ExpiresAtUtc > now &&
-                    trip.Status == TripStatus.PriceConfirmed
+                    trip.Status == TripStatus.PriceConfirmed &&
+                    trip.MatchingAttempt == invitation.Attempt
                 select new
                 {
                     trip.Id,
@@ -200,7 +201,8 @@ public sealed class TripAccessFilter(TripDbContext db) : IEndpointFilter
                     path.EndsWith("/driver-reject", StringComparison.OrdinalIgnoreCase))
                 {
                     if (trip.Status != TripStatus.PriceConfirmed || trip.DriverId is not null) return Results.Conflict();
-                    if (!await db.DriverInvitations.AnyAsync(x => x.TripId == id && x.DriverId == userId && !x.IsResolved &&
+                    if (!await db.DriverInvitations.AnyAsync(x => x.TripId == id && x.DriverId == userId &&
+                        x.Attempt == trip.MatchingAttempt && !x.IsResolved &&
                         x.ExpiresAtUtc > DateTime.UtcNow, http.RequestAborted)) return Results.Forbid();
                 }
                 else if (!(http.User.IsInRole("Rider") && trip.RiderId == userId) &&

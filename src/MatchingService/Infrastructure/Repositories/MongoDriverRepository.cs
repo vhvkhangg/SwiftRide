@@ -131,12 +131,7 @@ public sealed class MongoDriverRepository(IMongoDatabase database) : IDriverRepo
     {
         return await collection.Find(Builders<DriverLocation>.Filter.And(
                 Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
-                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt),
-                Builders<DriverLocation>.Filter.Or(
-                    Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationExpiresAtUtc, null),
-                    Builders<DriverLocation>.Filter.Gt(
-                        driver => driver.ReservationExpiresAtUtc,
-                        DateTime.UtcNow))))
+                Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt)))
             .FirstOrDefaultAsync(cancellationToken);
     }
 

@@ -7,7 +7,7 @@ using SwiftRide.TripService.Domain.Enums;
 
 namespace SwiftRide.TripService.Api;
 
-[Authorize]
+[Authorize(Roles = "Rider,Driver")]
 public sealed class TripNotificationHub(TripDbContext db) : Hub
 {
     public override async Task OnConnectedAsync()

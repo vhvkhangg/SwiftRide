@@ -61,7 +61,19 @@ public class TripApplicationServiceTests
         var idempotencyKey = "key-test-123";
         var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", null, idempotencyKey);
 
-        var payloadForHash = new { request.RiderId, request.PickupAddress, request.DropoffAddress, request.Distance };
+        var payloadForHash = new
+        {
+            request.RiderId,
+            request.PickupAddress,
+            request.DropoffAddress,
+            request.PickupLatitude,
+            request.PickupLongitude,
+            request.Distance,
+            request.EstimatedTime,
+            request.RideType,
+            request.PromoCode
+        };
+
         var hash = ComputeHash(payloadForHash);
 
         var existingTrip = Trip.Create(request.RiderId, "A", "B", 50000m, 10.0, 106.0, idempotencyKey, hash);
@@ -99,6 +111,45 @@ public class TripApplicationServiceTests
             () => _service.CreateAsync(request, CancellationToken.None));
 
         Assert.Contains("IdempotencyKey đã được sử dụng", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("RideType")]
+    [InlineData("PromoCode")]
+    [InlineData("EstimatedTime")]
+    public async Task CreateAsync_SameIdempotencyKey_ChangedQuoteInput_ThrowsConflict(string changedField)
+    {
+        var idempotencyKey = "key-quote-input-" + changedField;
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m,
+            "Moto", null, idempotencyKey);
+        var existingPayload = new
+        {
+            request.RiderId,
+            request.PickupAddress,
+            request.DropoffAddress,
+            request.PickupLatitude,
+            request.PickupLongitude,
+            request.Distance,
+            request.EstimatedTime,
+            request.RideType,
+            request.PromoCode
+        };
+        var hash = ComputeHash(existingPayload);
+        var existingTrip = Trip.Create(request.RiderId, "A", "B", 50000m, 10.0, 106.0, idempotencyKey, hash);
+        _readerMock.Setup(x => x.GetByIdempotencyKeyAsync(idempotencyKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingTrip);
+
+        var changed = changedField switch
+        {
+            "RideType" => request with { RideType = "Standard" },
+            "PromoCode" => request with { PromoCode = "WELCOME" },
+            _ => request with { EstimatedTime = 11m }
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.CreateAsync(changed, CancellationToken.None));
+
+        Assert.Contains("IdempotencyKey đã được sử dụng", exception.Message);
     }
 
     // --- KỊCH BẢN 2: TEST PHỤC HỒI PHIÊN ---

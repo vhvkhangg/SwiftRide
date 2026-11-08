@@ -209,7 +209,8 @@ namespace SwiftRide.TripService.Migrations
 
                     b.HasKey("TripId", "DriverId");
 
-                    b.HasIndex("TripId", "Attempt");
+                    b.HasIndex("TripId", "Attempt")
+                        .IsUnique();
 
                     b.ToTable("DriverInvitations");
                 });

@@ -41,13 +41,16 @@ public sealed class MongoDriverRepositoryReservationTests
             Assert.Single(results, result => result);
             var owner = await collection.Find(driver => driver.ReservationTripId != null &&
                 (driver.DriverId == drivers[0] || driver.DriverId == drivers[1])).SingleAsync(ct);
-            Assert.NotNull(await new MongoDriverRepository(database).FindReservationAsync(owner.ReservationTripId!.Value, 1, ct));
+            var restored = new MongoDriverRepository(database);
+            Assert.Equal(owner.DriverId, (await restored.FindReservationAsync(owner.ReservationTripId!.Value, 1, ct))?.DriverId);
+            Assert.Null(await restored.FindReservationAsync(owner.ReservationTripId.Value, 2, ct));
             Assert.True(await repository.TryReserveAsync(owner.DriverId, owner.ReservationTripId.Value, 1, expiry, ct));
             await repository.UpsertLocationAsync(owner.DriverId, owner.Location, true, ct);
             var stored = await collection.Find(driver => driver.DriverId == owner.DriverId).SingleAsync(ct);
             Assert.False(stored.IsAvailable);
             Assert.False(await repository.ReleaseReservationAsync(owner.DriverId, Guid.NewGuid(), 1, ct));
             Assert.True(await repository.ReleaseReservationAsync(owner.DriverId, owner.ReservationTripId.Value, 1, ct));
+            Assert.Null(await restored.FindReservationAsync(owner.ReservationTripId.Value, 1, ct));
             Assert.False(await repository.ReleaseReservationAsync(owner.DriverId, owner.ReservationTripId.Value, 1, ct));
         }
         finally

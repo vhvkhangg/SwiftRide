@@ -184,7 +184,8 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
-      AuthDatabase__EnsureCreated: "true"
+      AuthDatabase__Migrate: ${AUTH_DB_MIGRATE:-false}
+      AuthDatabase__EnsureCreated: ${AUTH_DB_ENSURE_CREATED:-true}
       DevelopmentAccounts__Enabled: "true"
       DevelopmentAccounts__Password: ${DEV_ACCOUNT_PASSWORD:-SwiftRide-demo-2026!}
       ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:-gateway_test_password}
@@ -202,7 +203,7 @@ services:
       Routes__8__UpstreamPathTemplate: /api/hubs/trips
       Routes__8__UpstreamHttpMethod__0: GET
       Routes__8__DownstreamPathTemplate: /hubs/trips
-      Routes__8__DownstreamScheme: http
+      Routes__8__DownstreamScheme: ws
       Routes__8__DownstreamHostAndPorts__0__Host: trip-service
       Routes__8__DownstreamHostAndPorts__0__Port: 8080
       Routes__9__UpstreamPathTemplate: /api/hubs/trips/{everything}

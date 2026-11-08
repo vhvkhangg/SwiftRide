@@ -1,5 +1,7 @@
 # Gateway và Authentication
 
+Hợp đồng HTTP/SignalR cho mobile và workflow mới: [mobile-api-contract.md](mobile-api-contract.md). Task 1 ngày 26/10/2026 đã kiểm tra transport qua Gateway thật và Auth smoke trên PostgreSQL thật; smoke nghiệp vụ còn phụ thuộc Docker Engine. Blocker build Matching đã sửa.
+
 SwiftRide dùng Ocelot trên .NET 10; Auth nằm ngay trong ApiGateway, database Auth là PostgreSQL. Gateway phát JWT HS256 và refresh token rotation. EF Core/Npgsql dùng phiên bản tập trung trong Directory.Packages.props.
 
 ## URL công khai
@@ -54,15 +56,15 @@ Revoke idempotent trả 204 và thu hồi family, không thu hồi các phiên �
 - Rider chỉ xem/hủy chuyến của mình; state machine vẫn kiểm tra trạng thái được hủy.
 - Driver chỉ xem/cập nhật chuyến đã được giao. Không được tạo chuyến thay Rider.
 - Vị trí Driver luôn dùng DriverId từ JWT; DriverId trong body bị bỏ qua.
-- Rider gọi /api/matching/match cho chuyến của mình. Matching tìm driver gần đó và tạo invitation bằng API nội bộ có authentication.
-- API danh sách lời mời /api/trips/invitations chưa triển khai, thuộc task Trip orchestration. Kiểm tra quyền nhận chuyến hiện dùng lời mời được Matching lưu qua endpoint nội bộ.
-- Driver nhận chuyến chỉ khi có invitation còn hạn (2 phút), Trip Requested và chưa có Driver. ID ở body không được dùng. PostgreSQL xmin concurrency token ngăn hai Driver nhận cùng một chuyến; loser trả 409.
-- Driver được giao dropoff sẽ chuyển chuyến sang PaymentPending trong cùng SaveChanges, không cần client gọi system transition.
+- Rider xác nhận giá qua /api/trips/{id}/confirm-price trước khi Trip gửi matching command. /api/matching/match chỉ trả ứng viên, không tạo lời mời.
+- GET /api/trips/driver/invitations chỉ trả lời mời chưa xử lý, chưa hết hạn của Driver đang đăng nhập.
+- Driver nhận/từ chối chuyến phải có invitation còn hạn, Trip PriceConfirmed và chưa có Driver. ID ở body không được dùng. PostgreSQL xmin concurrency token bảo vệ cập nhật cùng chuyến.
+- Driver dropoff nhận 202; Trip lưu PaymentPending và payment command qua transaction/outbox. Mobile chờ event hoặc poll Paid, không POST payment lần nữa.
 - Rider chỉ tạo/xem payment cho chuyến mình. Ownership được kiểm tra trước cả nhánh retry idempotency.
 - Refund/reconcile chỉ Admin. Chưa có public API cấp Admin.
 - User JWT không gọi được pay/fail/payment-pending của Trip. Các policy này yêu cầu credential nội bộ; không thể giả role bằng header.
 
-Payment hiện là mô phỏng ledger/thanh toán trong bài tập, chưa tích hợp nhà cung cấp thanh toán thật. Giá chuyến hiện vẫn theo FareEstimate trong API tạo chuyến; việc ràng buộc giá với quote được ký phía server là phần nghiệp vụ cần bổ sung trước khi sử dụng tiền thật.
+Payment hiện là mô phỏng ledger/thanh toán trong bài tập, chưa tích hợp nhà cung cấp thanh toán thật. Trip lấy giá qua Pricing nội bộ, không nhận FareEstimate làm giá từ client. Distance/time vẫn cần được xác minh phía server trước khi dùng tiền thật.
 
 ## Service-to-service
 
@@ -82,7 +84,7 @@ docker compose logs -f api-gateway
 pwsh -File tests/Gateway.Security/gateway-security.ps1
 ~~~
 
-Compose bật DevelopmentAccounts và EnsureCreated cho Auth. Trip/Payment dùng Database:Migrate=true để áp dụng migrations khi khởi động local. Production áp dụng migration bằng deployment job, tắt auto-migrate/seed và thiết lập secrets/TLS/network policy.
+Compose bật DevelopmentAccounts và giữ EnsureCreated cho database local legacy. Database Auth mới nên dùng `AUTH_DB_MIGRATE=true` và `AUTH_DB_ENSURE_CREATED=false`; overlay kiểm thử Task 1 đã bật hai giá trị này. Trip/Payment dùng Database:Migrate=true. Production nên chạy migration bằng deployment job riêng, tắt auto-migrate/seed và thiết lập secrets/TLS/network policy.
 
 PostgreSQL Auth local: localhost:5435, database swiftride_auth, username swiftride, password AUTH_DB_PASSWORD. Trip:5433, Payment:5434, Mongo:27017.
 
@@ -96,9 +98,21 @@ $env:ServiceAuth__SecretKey = "<different-generated-internal-key>"
 dotnet run --project src/TripService --urls http://localhost:5101
 ~~~
 
-Đặt Database__Migrate=true khi cần áp dụng migrations local. Gateway Auth với database mới có thể bật AuthDatabase__EnsureCreated=true trong Development. EnsureCreated không nâng cấp schema cũ, không kết hợp với migrations trên cùng database.
+Đặt `AuthDatabase__Migrate=true` và `Database__Migrate=true` khi cần áp dụng migrations local. `AuthDatabase__EnsureCreated` chỉ giữ cho bootstrap legacy database mới trong Development; không bật cùng migration trên cùng database.
 
 Migration DriverInvitationsAndConcurrency thêm bảng invitation và mapping xmin của PostgreSQL. Không xóa volume/database cũ để nâng cấp; áp dụng migration Trip.
+
+### Auth migrations
+
+Database Auth mới có thể chạy `dotnet ef database update --project src/ApiGateway --context AuthDbContext` với connection string và secrets đã cấu hình, hoặc bật `AuthDatabase__Migrate=true`. Chạy lại không tạo bảng hoặc migration history trùng. `GET /health` là liveness; `GET /health/ready` kiểm tra truy vấn được cả Users và RefreshTokens, trả 503 nếu database/schema chưa sẵn sàng.
+
+Database Auth cũ tạo bằng EnsureCreated chưa có migration history. Không bật Migrate trực tiếp: initial migration sẽ từ chối tạo lại bảng, không tự xóa hoặc sửa dữ liệu. Sao lưu bằng pg_dump, tạo SQL bằng `dotnet ef migrations script --project src/ApiGateway --context AuthDbContext`, đối chiếu schema thực tế và nhờ người vận hành review/baseline migration `20261108052137_InitialAuthSchema` trước khi chuyển sang migrations. Không tự ghi history khi chưa đối chiếu, không xóa volume để vượt lỗi.
+
+### Task 1 acceptance
+
+Chạy từ repo root: `pwsh -NoProfile -File tests/Gateway.Security/task1.ps1`. Runner tạo Compose project riêng, dùng loopback ports 15100-15103 và database test riêng; không chạy trên production hoặc khi ports này đang được dùng. Mặc định gỡ containers/network sau khi chạy, giữ volumes. `-KeepRunning` giữ stack để chẩn đoán.
+
+Runner kiểm tra initial migration và restart không tạo history trùng, refresh token còn dùng được sau restart Gateway, readiness 503 khi Auth PostgreSQL dừng, auth rotation/replay/logout/concurrency, rate limit 20 requests/phút, rồi luồng Trip/Matching/Payment thật qua Gateway và SignalR recipient isolation. Gateway được restart giữa các suite để reset cửa sổ rate limit, không tắt rate limiting. Workflow CI chạy runner sau system recovery suite; kết quả local không đồng nghĩa GitHub CI đã chạy.
 
 ## Kiểm chứng
 

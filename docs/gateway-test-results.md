@@ -1,5 +1,32 @@
 # Kết quả đối chiếu Gateway/Auth — 23/10/2026
 
+## Task 1 - 26/10/2026
+
+### Trang thai truoc commit
+
+- Docker Engine da khoi dong; stack test rieng da tao PostgreSQL, MongoDB va RabbitMQ.
+- Build image ung dung bi dung khi o C con khoang 642 MB va Docker tra loi 500. Chua chay business smoke full-stack/restart; can tiep tuc sau khi giai phong dung luong.
+- Commit theo yeu cau nguoi dung de luu tien do, khong phai xac nhan nghiem thu full-stack.
+
+### Kiểm tra bổ sung trên database thật
+
+- Đã sửa blocker /internal/quote sang CalculateAsync, truyền cancellation token. Solution test chạy thành công: **144 passed, 0 failed, 0 skipped**, Payment integration dùng PostgreSQL 18 test riêng.
+- Auth smoke chạy với ApiGateway thật và PostgreSQL 18 riêng: register/role isolation, /auth/me, Cache-Control no-store, duplicate email, invalid login, refresh rotation/concurrency, replay family revocation, logout và protected route đều đạt.
+- GatewayTransportTests bổ sung chạy PowerShell SignalR helper trên WebSocket thật: handshake, event nhận đúng và kiểm tra không rò event sang người khác đều đạt.
+- Business smoke đã bổ sung kiểm tra SignalR invitation/tripChanged, chưa chạy trọn luồng trên stack thật. Thêm compose.test.yml với ports riêng; hướng dẫn chạy ở mobile-api-contract.md.
+- **Chưa nghiệm thu full-stack:** Docker Desktop khởi động lỗi tại socket dockerInference (`The file cannot be accessed by the system`). Không thay đổi/xóa Docker volumes hay database hiện có. Chưa chạy MongoDB/RabbitMQ business smoke; không đồng nhất 144 test đạt với toàn bộ nghiệp vụ đạt.
+- Cảnh báo NU1903 của SQLite test dependency vẫn còn, thuộc task 5.
+
+Các bullet dưới ghi lại lần kiểm tra trước khi bổ sung DB thật.
+
+- Sửa route WebSocket sang ws ở Ocelot và Compose; xác thực JWT/role trước proxy WebSocket, chỉ chấp nhận query token tại hub upgrade, đóng hub khi authentication hết hạn.
+- Thêm GatewayTransportTests: chạy process ApiGateway thật, Trip HTTP endpoints/hub thật trên Kestrel, DB InMemory và application service giả. Kiểm tra HTTP ownership/role, lời mời riêng từng Driver, negotiate, WebSocket header/query token, token hết hạn và cô lập SignalR recipients.
+- Trip test suite: 29 passed, 0 failed, 0 skipped. Không dùng kết quả này để khẳng định business workflow trên PostgreSQL/RabbitMQ đã đạt.
+- Gateway security smoke đã đổi sang confirm-price, chờ lời mời và Paid từ messaging, không tạo payment lần hai. Tài liệu mobile ở mobile-api-contract.md.
+- Docker Engine chưa chạy; chưa chạy lại Auth refresh/logout smoke hoặc business smoke trên stack thật. Matching còn lỗi build Calculate/CalculateAsync thuộc task 3. Cảnh báo NU1903 của SQLite test dependency thuộc task 5 vẫn còn.
+
+Các phần bên dưới lưu kết quả lịch sử trước task 1.
+
 Nhánh: van. Kiểm tra theo checklist định tuyến, phân quyền Rider/Driver và xác thực downstream.
 
 ## Kiểm tra lại sau merge trên khanh — 23/10/2026

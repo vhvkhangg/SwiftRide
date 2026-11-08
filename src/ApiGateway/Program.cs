@@ -40,9 +40,15 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) &&
-                    context.Request.Path.StartsWithSegments("/api/hubs/trips"))
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.WebSockets.IsWebSocketRequest &&
+                    context.Request.Path == "/api/hubs/trips")
                     context.Token = accessToken;
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                if (!Guid.TryParse(context.Principal?.FindFirst("sub")?.Value, out var userId) || userId == Guid.Empty)
+                    context.Fail("Invalid subject.");
                 return Task.CompletedTask;
             }
         };
@@ -81,9 +87,30 @@ app.MapWhen(context => context.Request.Path.StartsWithSegments("/auth") ||
         endpoints.MapControllers();
         endpoints.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "ok" }))
             .AllowAnonymous();
+        endpoints.MapGet("/health/ready", async (AuthDbContext db, CancellationToken ct) =>
+        {
+            try
+            {
+                await db.Users.AsNoTracking().Select(user => user.Id).Take(1).ToListAsync(ct);
+                await db.RefreshTokens.AsNoTracking().Select(token => token.Id).Take(1).ToListAsync(ct);
+                return Results.Ok(new { service = "api-gateway", status = "ready" });
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }).AllowAnonymous();
     });
 });
-// Development bootstrap only. Production uses reviewed EF migrations.
+if (builder.Configuration.GetValue<bool>("AuthDatabase:Migrate") &&
+    builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
+    throw new InvalidOperationException("AuthDatabase:Migrate and EnsureCreated cannot both be enabled.");
+if (builder.Configuration.GetValue<bool>("AuthDatabase:Migrate"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
+}
+
 if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -92,6 +119,26 @@ if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("Aut
 if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("DevelopmentAccounts:Enabled"))
     await DevelopmentAccounts.SeedAsync(app.Services, builder.Configuration);
 app.UseWebSockets();
+app.UseAuthentication();
+app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"), hub =>
+{
+    hub.Use(async (context, next) =>
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+        if (!context.User.IsInRole("Rider") && !context.User.IsInRole("Driver"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+        foreach (var header in IdentityHeaders.Names) context.Request.Headers.Remove(header);
+        context.Request.Headers.Remove("Cookie");
+        await next(context);
+    });
+});
 await app.UseOcelot();
 await app.RunAsync();
 
