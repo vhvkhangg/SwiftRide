@@ -20,6 +20,18 @@ class HttpTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             messaging.wait(lambda: False, seconds=0)
 
+    def test_rabbit_create_delete_statuses_are_explicit(self):
+        response = MagicMock()
+        response.read.return_value = b""
+        with patch("urllib.request.urlopen") as open_url:
+            open_url.return_value.__enter__.return_value = response
+            for method, status in (("PUT", 201), ("POST", 201), ("DELETE", 204)):
+                with self.subTest(method=method):
+                    response.status = status
+                    self.assertIsNone(messaging.http(method, "http://localhost/api/queues", expected=status))
+                    with self.assertRaises(AssertionError):
+                        messaging.http(method, "http://localhost/api/queues")
+
 
 if __name__ == "__main__":
     unittest.main()

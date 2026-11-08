@@ -1,8 +1,8 @@
 # Task 5 - Local Verification Results
 
-Base commit: `10733f5fc08dc26ceb06903258ff9e80f7da6c99` (31 October 2026). Results apply to the uncommitted Task 5 changes in this workspace, not to the original HEAD alone.
+Base commit: `bb98d99861b8a4106cbdd6ee0b331a00771d7e2c` (8 November 2026). Results apply to the current uncommitted Task 5 changes, not to the base commit alone. This report supersedes the 31 October result.
 
-Full-stack run: **31 October 2026, 23:37:51-23:44:48, Asia/Saigon**. Isolated project: `swiftride-task5-e84cf73705`.
+Full-stack run: **8 November 2026, Asia/Bangkok**. Isolated project: `swiftride-task5-7a39daf35a`. Exact UTC timestamps are recorded in `artifacts/task5/system-current-final/report.json`.
 
 ## Verification
 
@@ -10,14 +10,14 @@ Full-stack run: **31 October 2026, 23:37:51-23:44:48, Asia/Saigon**. Isolated pr
 | --- | --- |
 | Whole-solution dependency restore/audit; NU1901-NU1904 treated as errors | PASS |
 | Release build of SwiftRide.sln | PASS; 0 warnings, 0 errors |
-| Unit/local HTTP tests | PASS; 152 passed, 0 failed, 0 skipped |
-| Python system-helper checks | PASS; 2 tests |
+| Unit/local HTTP tests | PASS; 153 passed, 0 failed, 0 skipped |
+| Python system-helper checks | PASS; 3 tests |
 | PostgreSQL Trip integration | PASS; 4 tests, 0 skipped |
 | PostgreSQL Payment integration | PASS; 12 tests, 0 skipped |
 | MongoDB reservation integration | PASS; 2 tests, 0 skipped |
-| System report | PASS; 20 checks: 3 database-test groups and 17 topology/E2E/recovery scenarios |
+| System report | PASS; 24 checks: 3 database-test groups and 21 topology/E2E/recovery scenarios |
 
-SDK: Windows .NET 10.0.403; production Dockerfiles use SDK 10.0.401. SDK, dependency cache, .NET output and primary reports are under `E:\SwiftRide-task5-10733f5` because drive D lacked build space. Small copies of build/unit logs and the JSON system report are under `artifacts/task5/system-current/`. Runbook and portable commands: [messaging.md](messaging.md).
+SDK: Windows .NET 10.0.403; production Dockerfiles use SDK 10.0.401. Build and test output is under `E:\SwiftRide`; system evidence is under `artifacts/task5/system-current-final/`. Runbook and portable commands: [messaging.md](messaging.md).
 
 ## Work Items And Evidence
 
@@ -25,7 +25,7 @@ SDK: Windows .NET 10.0.403; production Dockerfiles use SDK 10.0.401. SDK, depend
 | --- | --- |
 | Reservation lifecycle | Durable owner-scoped ReleaseDriverV1 on reject/timeout/cancel/dropoff; reconciliation against authoritative Trip state; expiry/heartbeat cannot unlock an active driver |
 | Candidate contention | Lost reservation race tries another candidate; exhaustion of bounded contention retries throws instead of falsely reporting no drivers; unit tests pass |
-| Duplicate matching attempt | Mongo unique DriverId and partial unique TripId/Attempt indexes; real concurrent tests verify one owner and one driver; repeated reads survive repository reconstruction |
+| Duplicate matching attempt | Mongo unique DriverId and partial unique TripId/Attempt indexes; real concurrent tests verify one owner and one driver. Fixed owner lookup hiding expired reservations; regression verifies restored owner, wrong attempt rejection and no owner after release |
 | Executable system suite | Production Dockerfiles, actual consumer registrations/topology and actual RabbitMQ/PostgreSQL/MongoDB; no repository replacement in the system path |
 | Four commit/delivery gaps | Confirm/matching, reservation/result/invitation, dropoff/payment and saved-payment/result all recover across broker disconnect or service kill |
 | Offline notifications | SignalR reconnect replays active PostgreSQL invitations; Gateway forwards DELETE for long-poll cleanup |
@@ -36,9 +36,13 @@ SDK: Windows .NET 10.0.403; production Dockerfiles use SDK 10.0.401. SDK, depend
 
 ## System Scenarios
 
-All entries below have `status=passed` in the JSON report:
+All scenarios below have `status=passed` in the final JSON report:
 
-- `topology`: eight durable business queues, one registered consumer each, expected event bindings.
+- `topology`: ten durable business queues, one registered consumer each, expected event bindings; command contracts have no publish subscribers.
+- `broker-durable-message`: persistent queued message survives broker restart; all consumers reconnect.
+- `skipped-contract`: unsupported contract retains the original MessageId in `_skipped`.
+- `invalid-command`: invalid matching command enters `_error` as ArgumentException with no retry or Trip creation.
+- `publish-fanout`: real PaymentSucceeded reaches Trip and two independent subscriber queues.
 - `clean-start`: fresh stack reaches readiness, migrations and Mongo seed complete.
 - `duplicate-create`: simultaneous same-key creates return one Trip.
 - `end-to-end`: Requested through Paid; active reservation remains locked despite forced expiry and heartbeat.
@@ -58,8 +62,8 @@ All entries below have `status=passed` in the JSON report:
 
 Payment is a ledger simulation, not a real PSP/bank integration. The system decline case seeds a persisted failed payment to exercise actual failure-event delivery; decision-service decline behavior is separately covered by application/database tests. No claim of a real bank decline is made.
 
-Gateway Auth still uses development-only EnsureCreated; production Auth schema evolution is not supplied by this patch. Local results do not replace business acceptance of Tasks 1-4 or an actual GitHub CI execution. `_skipped` retention is provided by MassTransit configuration; this run does not add a dedicated wrong-contract system scenario.
+Base Compose still uses development-only Auth EnsureCreated for legacy development volumes. Task 1 now provides Auth EF migrations and a migration-based acceptance overlay. Local results do not replace business acceptance of Tasks 1-4 or an actual GitHub CI execution.
 
-The first system attempt exposed a test-helper bug parsing plain-text readiness as JSON; it was fixed and the entire suite rerun successfully. That failed run remains separate from the final PASS report.
+The first current run exposed a real expired-owner lookup bug in Mongo; it is fixed without weakening the past-expiry test. New reliability scenarios also exposed helper assumptions about RabbitMQ creation/deletion HTTP statuses and temporarily missing consumer statistics after restart; both are fixed and covered by reruns. Failed attempts remain in separate artifact directories.
 
-Docker initially failed on stale runtime sockets. Only socket directories were renamed to preserved backups before restarting Desktop; Docker was not reset. Final test containers/network were stopped, test volumes retained, development volumes untouched. Random test credentials were not written to reports and the temporary empty Compose env file was removed.
+The runner stops its isolated containers/network on exit and retains test volumes. Development volumes and unrelated Docker projects are not touched. Random test credentials are redacted from failure reports; the temporary empty Compose env file is removed. No commit or push is part of this verification.

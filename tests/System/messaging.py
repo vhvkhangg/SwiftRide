@@ -107,10 +107,10 @@ class Stack:
         return self.compose("exec", "-T", "matching-mongodb", "mongosh", "--quiet",
                             self.env["MATCH_DB_NAME"], "--eval", script)
 
-    def rabbit(self, method, path, body=None):
+    def rabbit(self, method, path, body=None, expected=200):
         auth = base64.b64encode(f"task5:{self.env['RABBITMQ_PASSWORD']}".encode()).decode()
         return http(method, self.url("rabbitmq", 15672) + "/api/" + path, body,
-                    headers={"Authorization": "Basic " + auth})
+                    expected=expected, headers={"Authorization": "Basic " + auth})
 
     def queue(self, name):
         return self.rabbit("GET", "queues/task5/" + name)
@@ -127,6 +127,11 @@ class Stack:
         self.publish(queue, json.dumps(envelope),
                      {"content_type": "application/vnd.masstransit+json", "delivery_mode": 2})
         return envelope["messageId"]
+
+    def messages(self, queue, requeue=True):
+        return self.rabbit("POST", "queues/task5/" + queue + "/get",
+                          dict(count=10, ackmode="ack_requeue_true" if requeue else "ack_requeue_false",
+                               encoding="auto", truncate=1000000))
 
     def status(self, trip_id):
         return self.sql("trip-postgres", f'''SELECT "Status" FROM "Trips" WHERE "Id"='{trip_id}';''')
@@ -198,15 +203,55 @@ def scenarios(stack, record):
         wait(lambda service=service: http("GET", stack.url(service) + "/health/ready"))
     queues = ["swiftride-matching-find-driver-for-trip", "swiftride-matching-release-driver", FOUND,
               "swiftride-trip-no-driver-found-for-trip", PAYMENT, "swiftride-trip-payment-succeeded",
-              "swiftride-trip-payment-failed", "swiftride-trip-payment-fault"]
+              "swiftride-trip-payment-failed", "swiftride-trip-payment-fault",
+              "swiftride-matching-reservation-confirmed", "swiftride-matching-reservation-released"]
     for name in queues:
-        queue = wait(lambda name=name: stack.queue(name), lambda value: value["consumers"] == 1)
+        queue = wait(lambda name=name: stack.queue(name), lambda value: value.get("consumers") == 1)
         check(queue["durable"] and not queue["auto_delete"], f"Non-durable business queue: {name}")
     bindings = stack.rabbit("GET", "bindings/task5")
     for event in ("driver-found-for-trip", "no-driver-found-for-trip", "payment-succeeded", "payment-failed", "payment-fault"):
         check(any(binding["source"] == f"swiftride-{event}-v1" and binding["destination"] == f"swiftride-trip-{event}"
                   for binding in bindings), f"Missing binding: {event}")
-    record("topology", "Eight durable business queues, registered consumers and event bindings")
+    for event in ("confirmed", "released"):
+        check(any(binding["source"] == f"swiftride-driver-reservation-{event}-v1" and
+                  binding["destination"] == f"swiftride-matching-reservation-{event}"
+                  for binding in bindings), f"Missing reservation binding: {event}")
+    for command in ("find-driver-for-trip", "release-driver", "process-payment"):
+        check(not any(binding["source"] == f"swiftride-{command}-v1" for binding in bindings),
+              f"Command unexpectedly has publish subscribers: {command}")
+    record("topology", "Ten durable business queues, registered consumers and event bindings; commands use direct Send")
+
+    probe = "task5-durable-probe"
+    stack.rabbit("PUT", "queues/task5/" + probe, dict(durable=True, auto_delete=False, arguments={}), expected=201)
+    marker = str(uuid.uuid4())
+    stack.publish(probe, marker, {"content_type": "text/plain", "delivery_mode": 2})
+    stack.compose("restart", "rabbitmq")
+    retained = wait(lambda: stack.messages(probe, requeue=False))
+    check(retained[0]["payload"] == marker and retained[0]["properties"]["delivery_mode"] == 2,
+          "Persistent message lost across broker restart")
+    stack.rabbit("DELETE", "queues/task5/" + probe, expected=204)
+    for name in queues:
+        wait(lambda name=name: stack.queue(name), lambda value: value.get("consumers") == 1)
+    record("broker-durable-message", "Queued persistent message survived broker restart; all consumers reconnected")
+
+    wrong_id = stack.send(PAYMENT, "Matching:DriverFoundForTripV1",
+                          dict(tripId=str(uuid.uuid4()), correlationId=str(uuid.uuid4())))
+    skipped = wait(lambda: stack.messages(PAYMENT + "_skipped"))
+    check(any(json.loads(item["payload"])["messageId"] == wrong_id for item in skipped),
+          "Wrong-contract message not retained in _skipped")
+    record("skipped-contract", "Wrong contract retained with original MessageId in _skipped")
+
+    invalid_trip = str(uuid.uuid4())
+    invalid_id = stack.send("swiftride-matching-find-driver-for-trip", "Matching:FindDriverForTripV1",
+                            dict(tripId=invalid_trip, correlationId=invalid_trip, attempt=0))
+    rejected = wait(lambda: stack.messages("swiftride-matching-find-driver-for-trip_error"))
+    rejected = next(item for item in rejected if json.loads(item["payload"])["messageId"] == invalid_id)
+    headers = rejected["properties"].get("headers", {})
+    check(headers.get("MT-Fault-ExceptionType") == "System.ArgumentException" and
+          int(headers.get("MT-Fault-RetryCount", 0)) == 0, "Invalid command unexpectedly retried")
+    check(stack.sql("trip-postgres", f"SELECT count(*) FROM \"Trips\" WHERE \"Id\"='{invalid_trip}';") == "0",
+          "Invalid command created Trip state")
+    record("invalid-command", "ArgumentException bypassed retry; original retained in _error without business mutation")
     def login(email):
         token = http("POST", stack.gateway + "/auth/login", dict(email=email, password=stack.env["DEV_ACCOUNT_PASSWORD"]))["accessToken"]
         user = http("GET", stack.gateway + "/auth/me", token=token)
@@ -221,6 +266,11 @@ def scenarios(stack, record):
     check(created[0]["id"] == created[1]["id"], "Concurrent create duplicated trip")
     record("duplicate-create", "Concurrent same-key creates reused one trip")
 
+    subscribers = ("task5-payment-observer-a", "task5-payment-observer-b")
+    for subscriber in subscribers:
+        stack.rabbit("PUT", "queues/task5/" + subscriber, dict(durable=True, auto_delete=False, arguments={}), expected=201)
+        stack.rabbit("POST", "bindings/task5/e/swiftride-payment-succeeded-v1/q/" + subscriber,
+                     dict(routing_key="", arguments={}), expected=201)
     trip = stack.picked_up()
     stack.mongo(f'db.drivers.updateOne({{DriverId:"{stack.driver_id}"}},{{$set:{{ReservationExpiresAtUtc:new Date(0)}}}})')
     http("POST", stack.gateway + "/api/drivers/location", dict(latitude=10.77, longitude=106.69, isAvailable=True), stack.driver)
@@ -230,6 +280,12 @@ def scenarios(stack, record):
     stack.action(trip["id"], "dropoff", True)
     stack.settled(trip["id"])
     record("end-to-end", trip["id"] + ": Requested through Paid; active reservation survived expiry/heartbeat")
+    for subscriber in subscribers:
+        events = wait(lambda subscriber=subscriber: stack.messages(subscriber))
+        check(any(json.loads(item["payload"])["message"]["tripId"] == trip["id"] for item in events),
+              "Published payment result did not reach every subscriber")
+        stack.rabbit("DELETE", "queues/task5/" + subscriber, expected=204)
+    record("publish-fanout", "Real PaymentSucceeded reached Trip and two independent subscriber queues")
 
     command = stack.payment_command(trip)
     original = stack.send(PAYMENT, "Payments:ProcessPaymentV1", command)
