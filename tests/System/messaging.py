@@ -467,6 +467,9 @@ def main():
         stack.compose("config", "--quiet")
         started = True
         stack.compose("up", "-d", *([] if args.no_build else ["--build"]), timeout=1800)
+        check(stack.mongo("print(db.serverStatus().tcmalloc.usingPerCPUCaches)") == "false",
+              "MongoDB must disable TCMalloc per-CPU caches on affected Linux kernels")
+        record("mongo-allocator-compatibility", "TCMalloc per-CPU caches disabled; kernel rseq incompatibility avoided")
         if args.dotnet:
             env = dict(stack.env)
             for name, service in (("TRIP", "trip-postgres"), ("PAYMENT", "payment-postgres")):
