@@ -1,0 +1,2203 @@
+{
+  "info": {
+    "name": "SwiftRide - API Grading",
+    "_postman_id": "8f44f3f5-4fd8-4f83-8c3e-6d0d4f51a001",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run entire collection once, sequentially, with SwiftRide Local environment and 500ms request delay. Development/test only: creates users/trips/payments and changes two demo Drivers availability. Requires fresh isolated data and seeded Drivers. Gateway only. Payment is ledger simulation, not a bank charge. See postman/README.md. Polling needs Collection Runner/Newman; Send does not follow setNextRequest. No real secrets or issued tokens are included."
+  },
+  "variable": [],
+  "item": [
+    {
+      "name": "00 - Readiness",
+      "item": [
+        {
+          "name": "00 Gateway readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/health/ready"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const base = pm.environment.get('baseUrl');",
+                  "if (!base || !/^https?:\\/\\/\\S+$/.test(base) || base.endsWith('/')) { throw new Error('Set environment baseUrl to an HTTP(S) Gateway URL without trailing slash.'); }",
+                  "const seconds = Number(pm.environment.get('pollTimeoutSeconds'));",
+                  "if (!Number.isFinite(seconds) || seconds < 5 || seconds > 120) { throw new Error('pollTimeoutSeconds must be 5..120.'); }",
+                  "pm.collectionVariables.unset('riderToken');",
+                  "pm.collectionVariables.unset('otherToken');",
+                  "pm.collectionVariables.unset('driverToken');",
+                  "pm.collectionVariables.unset('otherDriverToken');",
+                  "pm.collectionVariables.unset('riderRefresh');",
+                  "pm.collectionVariables.unset('driverRefresh');",
+                  "pm.collectionVariables.unset('otherDriverRefresh');",
+                  "pm.collectionVariables.unset('otherRefresh');",
+                  "pm.collectionVariables.unset('riderId');",
+                  "pm.collectionVariables.unset('driverId');",
+                  "pm.collectionVariables.unset('tripId');",
+                  "pm.collectionVariables.unset('cancelTripId');",
+                  "pm.collectionVariables.unset('paymentId');",
+                  "pm.collectionVariables.unset('fareEstimate');",
+                  "pm.collectionVariables.unset('invitationDeadline');",
+                  "pm.collectionVariables.unset('paymentDeadline');",
+                  "pm.collectionVariables.set('runId', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().status).to.eql('ready'); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "01 Gateway liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().service).to.eql('api-gateway'); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Accounts",
+      "item": [
+        {
+          "name": "02 Register fresh Rider (ignore forged Admin role)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-rider-{{runId}}@example.com\",\n  \"password\": \"{{testPassword}}\",\n  \"role\": \"Admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [201];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().id).to.be.a('string').and.not.empty; } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 Register other Rider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-other-{{runId}}@example.com\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [201];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 Login Rider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-rider-{{runId}}@example.com\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'); pm.collectionVariables.set('riderToken', data.accessToken); pm.collectionVariables.set('riderRefresh', data.refreshToken); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 Login other Rider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-other-{{runId}}@example.com\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'); pm.collectionVariables.set('otherToken', data.accessToken); pm.collectionVariables.set('otherRefresh', data.refreshToken); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 Login seeded Driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{driverEmail}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'); pm.collectionVariables.set('driverToken', data.accessToken); pm.collectionVariables.set('driverRefresh', data.refreshToken); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 Login second seeded Driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{otherDriverEmail}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'); pm.collectionVariables.set('otherDriverToken', data.accessToken); pm.collectionVariables.set('otherDriverRefresh', data.refreshToken); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08 Rider identity and role isolation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.roles).to.include('Rider'); pm.expect(data.roles).not.to.include('Admin'); pm.collectionVariables.set('riderId', data.id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09 Driver identity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.roles).to.include('Driver'); pm.collectionVariables.set('driverId', data.id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Validation and roles",
+      "item": [
+        {
+          "name": "10 Missing token rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/api/trips/active"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [401];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 Duplicate registration rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-rider-{{runId}}@example.com\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [409];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 Wrong password rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-rider-{{runId}}@example.com\",\n  \"password\": \"Wrong-postman-password-2026!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [401];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 Rider cannot write Driver location",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/drivers/location",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 10.77,\n  \"longitude\": 106.69,\n  \"isAvailable\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 Driver cannot create Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 Invalid coordinates rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/drivers/location",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 91,\n  \"longitude\": 106.69,\n  \"isAvailable\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [400];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Pricing and location",
+      "item": [
+        {
+          "name": "16 Quote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/matching/quote",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().total).to.be.a('number').and.above(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17 Second Driver offline",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherDriverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/drivers/location",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 10.77,\n  \"longitude\": 106.69,\n  \"isAvailable\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().isAvailable).to.eql(false); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18 Driver online (body identity ignored)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/drivers/location",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driverId\": \"00000000-0000-0000-0000-000000000001\",\n  \"latitude\": 10.77,\n  \"longitude\": 106.69,\n  \"isAvailable\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().driverId).to.eql(pm.collectionVariables.get('driverId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Trip and idempotency",
+      "item": [
+        {
+          "name": "19 Create Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [201];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.riderId).to.eql(pm.collectionVariables.get('riderId')); pm.expect([0,'Requested']).to.include(data.status); pm.expect(data.fareEstimate).to.be.a('number').and.above(0); pm.collectionVariables.set('tripId', data.id); pm.collectionVariables.set('fareEstimate', data.fareEstimate); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "20 Repeat same create key returns same Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [201];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('tripId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "21 Same key with changed payload rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Changed destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [409];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "22 Other Rider cannot read Trip",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "23 Other Rider cannot cancel Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "24 Accept before invitation rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/driver-accept",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [409];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "25 Confirm price starts matching",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/confirm-price",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [202];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Driver lifecycle",
+      "item": [
+        {
+          "name": "26 Poll invitation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/driver/invitations"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('invitationDeadline')) { pm.collectionVariables.set('invitationDeadline', Date.now() + Number(pm.environment.get('pollTimeoutSeconds')) * 1000); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json();",
+                  "const ready = Array.isArray(data) && data.some(row => row.id === pm.collectionVariables.get('tripId'));",
+                  "const deadlineKey = 'invitationDeadline';",
+                  "if (ready) { pm.collectionVariables.unset(deadlineKey); }",
+                  "else if (false) { pm.collectionVariables.unset(deadlineKey); pm.execution.setNextRequest(null); throw new Error('invitation reached terminal state before expected result'); }",
+                  "else {",
+                  " const deadline = Number(pm.collectionVariables.get(deadlineKey));",
+                  " if (Date.now() >= deadline) { pm.collectionVariables.unset(deadlineKey); pm.execution.setNextRequest(null); throw new Error('invitation timed out; inspect matching/payment consumers and error queues'); }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "} } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "27 Uninvited Driver cannot accept",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherDriverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/driver-accept",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "28 Accept invitation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/driver-accept",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "29 Duplicate accept rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/driver-accept",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [409];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "30 Driver active Trip",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/active"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('tripId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "31 Rider cannot drive state transition",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/enroute",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "32 Enroute",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/enroute",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "33 Pickup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/pickup",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "34 Dropoff starts payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/dropoff",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [202];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Payment",
+      "item": [
+        {
+          "name": "35 Poll until Paid",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('paymentDeadline')) { pm.collectionVariables.set('paymentDeadline', Date.now() + Number(pm.environment.get('pollTimeoutSeconds')) * 1000); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json();",
+                  "const ready = [7,'Paid'].includes(data.status);",
+                  "const deadlineKey = 'paymentDeadline';",
+                  "if (ready) { pm.collectionVariables.unset(deadlineKey); }",
+                  "else if ([8,9,'Cancelled','Failed'].includes(data.status)) { pm.collectionVariables.unset(deadlineKey); pm.execution.setNextRequest(null); throw new Error('payment reached terminal state before expected result'); }",
+                  "else {",
+                  " const deadline = Number(pm.collectionVariables.get(deadlineKey));",
+                  " if (Date.now() >= deadline) { pm.collectionVariables.unset(deadlineKey); pm.execution.setNextRequest(null); throw new Error('payment timed out; inspect matching/payment consumers and error queues'); }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "} } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "36 Payment by Trip",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/payments/trip/{{tripId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.tripId).to.eql(pm.collectionVariables.get('tripId')); pm.expect(data.status).to.eql('Succeeded'); pm.expect(data.amount).to.eql(Number(pm.collectionVariables.get('fareEstimate'))); pm.expect(data.idempotencyKey).to.eql('trip-' + pm.collectionVariables.get('tripId').replace(/-/g,'') + '-payment-v1'); pm.collectionVariables.set('paymentId', data.id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "37 Payment by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('paymentId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "38 Other Rider cannot read Payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{otherToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "39 Rider cannot refund",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/payments/{{paymentId}}/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [403];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "40 Rider cannot force Paid",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{tripId}}/pay",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [401];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Cancel",
+      "item": [
+        {
+          "name": "41 Create cancellable Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-cancel-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [201];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.collectionVariables.set('cancelTripId', pm.response.json().id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "42 Owner cancels Requested Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{cancelTripId}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "43 Verify Cancelled",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{cancelTripId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect([8,'Cancelled']).to.include(pm.response.json().status); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 - Refresh and logout",
+      "item": [
+        {
+          "name": "44 Rotate Rider refresh token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/refresh-token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{riderRefresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.refreshToken).not.to.eql(pm.collectionVariables.get('riderRefresh')); pm.collectionVariables.set('riderToken', data.accessToken); pm.collectionVariables.set('riderRefresh', data.refreshToken); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "45 Refreshed session works",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('riderId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "46 Logout revokes refresh family",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{riderRefresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "47 Revoked refresh rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/refresh-token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{riderRefresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [401];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 - Cleanup",
+      "item": [
+        {
+          "name": "48 Driver offline",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{driverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/drivers/location",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 10.77,\n  \"longitude\": 106.69,\n  \"isAvailable\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().isAvailable).to.eql(false); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "49 Logout Driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{driverRefresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "50 Logout other Driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{otherDriverRefresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "51 Logout other Rider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/auth/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{otherRefresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [204];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

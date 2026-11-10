@@ -173,6 +173,10 @@ dotnet test --solution SwiftRide.sln -- --filter-not-trait Category=Integration
 python tests/System/messaging.py --dotnet dotnet
 ```
 
+### Postman API grading
+
+Import the collection and local environment from `postman/`. Run the entire collection sequentially with a 500 ms request delay. See [Postman setup and scope](postman/README.md) for seeded accounts, asynchronous polling, Newman commands and test-data precautions. Offline script checks: `node --test postman/collection.test.cjs`.
+
 ## 9. Ghi chú scaffold
 
 Repository đã có luồng Trip/Matching/Pricing/Payment, reservation và inbox/outbox. Payment hiện mô phỏng ledger, chưa tích hợp PSP/ngân hàng thật. Xem [runbook](docs/messaging.md) và [bằng chứng kiểm thử](docs/task5-results.md).
