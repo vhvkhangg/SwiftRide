@@ -15,12 +15,13 @@ using SwiftRide.MatchingService.Application.DTOs;
 using SwiftRide.MatchingService.Application.Interfaces;
 using SwiftRide.MatchingService.Domain.Interfaces;
 using SwiftRide.Security;
+using SwiftRide.Tests.Shared;
 
 namespace SwiftRide.MatchingService.Tests;
 
 public sealed class MatchingSecurityTests
 {
-    private const string UserKey = "matching-test-user-signing-key-at-least-32-bytes";
+    private static readonly TestOidcIssuer Users = new();
     private const string ServiceKey = "matching-test-service-signing-key-at-least-32-bytes";
 
     [Fact]
@@ -32,12 +33,10 @@ public sealed class MatchingSecurityTests
         builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
-            ["JwtSettings:Audience"] = "SwiftRide.Client",
-            ["JwtSettings:SecretKey"] = UserKey,
             ["ServiceAuth:SecretKey"] = ServiceKey
-        });
+        }).AddInMemoryCollection(Users.Settings());
         builder.Services.AddServiceSecurity(builder.Configuration);
+        Users.TrustIn(builder.Services);
         var repository = new Mock<IDriverRepository>();
         var pricing = new Mock<IPricingService>();
         QuoteRequest? received = null;
@@ -96,12 +95,12 @@ public sealed class MatchingSecurityTests
         await app.StopAsync(ct);
     }
 
-    private static string Token(string subject, string role, bool service = false) =>
-        new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
-            issuer: service ? "SwiftRide.Services" : "SwiftRide.Gateway",
-            audience: service ? "SwiftRide.Internal" : "SwiftRide.Client",
+    private static string Token(string subject, string role, bool service = false) => service
+        ? new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+            issuer: "SwiftRide.Services", audience: "SwiftRide.Internal",
             claims: [new Claim("sub", subject), new Claim("role", role)],
             expires: DateTime.UtcNow.AddMinutes(5),
-            signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(service ? ServiceKey : UserKey)),
-                SecurityAlgorithms.HmacSha256)));
+            signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(ServiceKey)),
+                SecurityAlgorithms.HmacSha256)))
+        : Users.Token(subject, role);
 }

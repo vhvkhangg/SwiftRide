@@ -13,6 +13,12 @@ using SwiftRide.MatchingService.Infrastructure.Time;
 using SwiftRide.MatchingService.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+// Tham số giá và TTL vị trí đổi được khi đang chạy: file tự nạp lại; biến môi trường vẫn ghi đè (test).
+builder.Configuration
+    .AddJsonFile("config/matching-settings.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
+builder.Services.Configure<PricingOptions>(builder.Configuration.GetSection("Pricing"));
+builder.Services.Configure<DriverAvailabilityOptions>(builder.Configuration.GetSection("DriverAvailability"));
 
 builder.Services.AddSwiftRideMessaging(builder.Configuration, "matching", consumers =>
 {
@@ -69,6 +75,15 @@ builder.Services.AddHttpClient<TripAccessClient>(client =>
 }).AddHttpMessageHandler<InternalTripHandler>();
 
 var app = builder.Build();
+var settingsLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("MatchingSettings");
+var pricingMonitor = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<PricingOptions>>();
+var availabilityMonitor = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<DriverAvailabilityOptions>>();
+pricingMonitor.CurrentValue.Validate();
+_ = availabilityMonitor.CurrentValue.LocationTtl;
+pricingMonitor.OnChange((o, _) => settingsLog.LogInformation(
+    "Pricing changed at runtime: CostPerKm={Km}, CostPerMinute={Min}, VatRate={Vat}, Toll={Toll}", o.CostPerKm, o.CostPerMinute, o.VatRate, o.Toll));
+availabilityMonitor.OnChange((o, _) => settingsLog.LogInformation(
+    "DriverAvailability changed at runtime: LocationTtlSeconds={Ttl}", o.LocationTtlSeconds));
 
 // Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
 app.MapHealthChecks("/health/ready").AllowAnonymous();

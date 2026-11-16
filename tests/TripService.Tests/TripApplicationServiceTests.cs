@@ -32,9 +32,9 @@ public class TripApplicationServiceTests
 
     public TripApplicationServiceTests()
     {
-        var options = Options.Create(new TripMatchingOptions
+        var options = TestOptions.Monitor(new TripMatchingOptions
         {
-            MaxAttempts = 3,
+            DeclineThreshold = 2,
             InvitationTimeoutSeconds = 30,
             SearchRadiusKm = 5
         });

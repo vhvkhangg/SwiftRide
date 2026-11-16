@@ -68,8 +68,8 @@ class Stack:
                         PAYMENT_DB_NAME="swiftride_payment_test", MATCH_DB_NAME="swiftride_matching_test",
                         TRIP_DB_USER="swiftride", PAYMENT_DB_USER="swiftride")
         self.secrets = []
-        for key in ("RABBITMQ_PASSWORD", "TRIP_DB_PASSWORD", "PAYMENT_DB_PASSWORD", "AUTH_DB_PASSWORD",
-                    "JWT_SECRET_KEY", "SERVICE_AUTH_SECRET_KEY", "DEV_ACCOUNT_PASSWORD"):
+        for key in ("RABBITMQ_PASSWORD", "TRIP_DB_PASSWORD", "PAYMENT_DB_PASSWORD", "KEYCLOAK_DB_PASSWORD",
+                    "KEYCLOAK_ADMIN_PASSWORD", "SERVICE_AUTH_SECRET_KEY", "DEV_ACCOUNT_PASSWORD"):
             self.env[key] = secrets.token_hex(24) + "Aa1!"
             self.secrets.append(self.env[key])
         with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as empty:
@@ -202,7 +202,7 @@ class Stack:
 
 
 def scenarios(stack, record):
-    wait(lambda: http("GET", stack.gateway + "/health"))
+    wait(lambda: http("GET", stack.gateway + "/health/ready"))
     for service in ("trip-service", "matching-service", "payment-service"):
         wait(lambda service=service: http("GET", stack.url(service) + "/health/ready"))
     queues = ["swiftride-matching-find-driver-for-trip", "swiftride-matching-release-driver", FOUND,
@@ -257,9 +257,16 @@ def scenarios(stack, record):
           "Invalid command created Trip state")
     record("invalid-command", "ArgumentException bypassed retry; original retained in _error without business mutation")
     def login(email):
-        token = http("POST", stack.gateway + "/auth/login", dict(email=email, password=stack.env["DEV_ACCOUNT_PASSWORD"]))["accessToken"]
-        user = http("GET", stack.gateway + "/auth/me", token=token)
-        return token, user["id"]
+        # Users and tokens live in Keycloak; the test client uses the dev-only password grant.
+        oidc = stack.url("keycloak") + "/realms/swiftride/protocol/openid-connect"
+        form = urllib.parse.urlencode(dict(grant_type="password", client_id="swiftride-postman", scope="openid",
+                                           username=email, password=stack.env["DEV_ACCOUNT_PASSWORD"])).encode()
+        request = urllib.request.Request(oidc + "/token", data=form, method="POST",
+                                         headers={"Content-Type": "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            token = json.loads(response.read())["access_token"]
+        user = http("GET", oidc + "/userinfo", token=token)
+        return token, user["sub"]
     stack.rider, stack.rider_id = login("rider.demo@example.com")
     stack.driver, stack.driver_id = login("driver.demo@example.com")
     record("clean-start", "All services ready, migrations and Mongo seed completed")
@@ -344,6 +351,8 @@ def scenarios(stack, record):
     finally:
         stack.compose("exec", "-T", "rabbitmq", "rabbitmqctl", "set_vm_memory_high_watermark", "0.6")
         stack.compose("start", "matching-service")
+    # Later scenarios call Matching through the Gateway; wait until the restarted service serves HTTP.
+    wait(lambda: http("GET", stack.url("matching-service") + "/health/ready"))
     wait(lambda: stack.invitation(pending["id"]))
     stack.reconnect(pending["id"])
     check(stack.mongo(f'print(db.drivers.countDocuments({{ReservationTripId:UUID("{pending["id"]}")}}))') == "1", "Reservation duplicated on replay")

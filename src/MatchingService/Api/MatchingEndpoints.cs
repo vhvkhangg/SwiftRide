@@ -32,6 +32,26 @@ public static class MatchingEndpoints
         .WithTags("Định giá (Pricing)")
         .Produces<QuoteResponseDto>().RequireAuthorization(p => p.RequireRole("Rider"));
 
+        // Tham số đang áp dụng: giá (file cấu hình), TTL vị trí, và luật surge đang có trong MongoDB.
+        app.MapGet("/settings", async (
+            [Microsoft.AspNetCore.Mvc.FromServices] Microsoft.Extensions.Options.IOptionsMonitor<SwiftRide.MatchingService.Application.Services.PricingOptions> pricing,
+            [Microsoft.AspNetCore.Mvc.FromServices] Microsoft.Extensions.Options.IOptionsMonitor<SwiftRide.MatchingService.Application.Services.DriverAvailabilityOptions> availability,
+            [Microsoft.AspNetCore.Mvc.FromServices] MongoDB.Driver.IMongoDatabase database,
+            CancellationToken ct) =>
+        {
+            var surge = await MongoDB.Driver.IAsyncCursorSourceExtensions.ToListAsync(
+                MongoDB.Driver.IMongoCollectionExtensions.Find(
+                    database.GetCollection<SwiftRide.MatchingService.Domain.Models.SurgeRuleDocument>("surge_rules"),
+                    MongoDB.Driver.FilterDefinition<SwiftRide.MatchingService.Domain.Models.SurgeRuleDocument>.Empty), ct);
+            return Results.Ok(new
+            {
+                pricing = pricing.CurrentValue,
+                locationTtlSeconds = availability.CurrentValue.LocationTtlSeconds,
+                surgeRules = surge.Select(r => new { r.StartHour, r.EndHour, r.Multiplier }),
+                formula = "p = ((CostPerKm*d + CostPerMinute*t)*surge + Toll) * eta * (1 + VatRate)"
+            });
+        });
+
         app.MapPost("/internal/quote", CalculateQuoteAsync)
         .WithSummary("Tính báo giá cho Trip Service")
         .WithTags("Định giá (Pricing)")

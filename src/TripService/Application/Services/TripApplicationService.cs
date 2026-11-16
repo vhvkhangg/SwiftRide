@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Payments;
+using SwiftRide.Contracts.Trips;
 using SwiftRide.Messaging;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
@@ -24,7 +25,18 @@ public sealed class TripApplicationService : ITripApplicationService
     private readonly ITripNotifier _notifier;
     private readonly IMatchingPricingClient _matchingPricing;
     private readonly ITripMessageBus _messageBus;
-    private readonly TripMatchingOptions _options;
+    private readonly IOptionsMonitor<TripMatchingOptions> _optionsMonitor;
+
+    // Đọc giá trị hiện hành mỗi lần dùng: đổi config/trip-matching.json có hiệu lực ngay, không restart.
+    private TripMatchingOptions _options
+    {
+        get
+        {
+            var current = _optionsMonitor.CurrentValue;
+            current.Validate();
+            return current;
+        }
+    }
 
     public TripApplicationService(
         ITripWriter writer,
@@ -34,7 +46,7 @@ public sealed class TripApplicationService : ITripApplicationService
         ITripNotifier notifier,
         IMatchingPricingClient matchingPricing,
         ITripMessageBus messageBus,
-        IOptions<TripMatchingOptions> options)
+        IOptionsMonitor<TripMatchingOptions> options)
     {
         _writer = writer;
         _reader = reader;
@@ -43,11 +55,8 @@ public sealed class TripApplicationService : ITripApplicationService
         _notifier = notifier;
         _matchingPricing = matchingPricing;
         _messageBus = messageBus;
-        _options = options.Value;
-
-        if (_options.MaxAttempts < 1 || _options.InvitationTimeoutSeconds < 1 ||
-            !double.IsFinite(_options.SearchRadiusKm) || _options.SearchRadiusKm <= 0)
-            throw new InvalidOperationException("Cấu hình TripMatching không hợp lệ.");
+        _optionsMonitor = options;
+        _ = _options; // validate at construction
     }
 
     public async Task<TripResponse> CreateAsync(CreateTripRequest request, CancellationToken ct = default)
@@ -162,7 +171,7 @@ public sealed class TripApplicationService : ITripApplicationService
 
             if (trip.MatchingAttempt == 0)
             {
-                trip.BeginMatchingAttempt(_options.MaxAttempts);
+                trip.BeginMatchingAttempt(_options.DeclineThreshold + 1);
                 changed = true;
             }
 
@@ -296,14 +305,16 @@ public sealed class TripApplicationService : ITripApplicationService
                 timeout ? "invitation-timeout" : "driver-rejected",
                 transactionCt);
 
-            if (trip.MatchingAttempt >= _options.MaxAttempts)
+            // Quy ước của đề: chỉ Failed khi số lần từ chối vượt ngưỡng (DeclineCount > k).
+            var threshold = _options.DeclineThreshold;
+            if (trip.RecordDecline() > threshold)
             {
                 trip.MarkFailed();
                 await _writer.SaveAsync(trip, transactionCt);
                 return ToResponse(trip);
             }
 
-            var nextAttempt = trip.BeginMatchingAttempt(_options.MaxAttempts);
+            var nextAttempt = trip.BeginMatchingAttempt(threshold + 1);
             await _writer.SaveAsync(trip, transactionCt);
             await SendFindDriverAsync(trip, nextAttempt, transactionCt);
             return null;
@@ -346,7 +357,8 @@ public sealed class TripApplicationService : ITripApplicationService
                 throw new InvalidOperationException("Chuyến chưa ở trạng thái có thể thanh toán.");
             }
 
-            var payment = new ProcessPaymentV1
+            // Saga thanh toán (TripPaymentStateMachine) nhận event này và gửi ProcessPaymentV1.
+            var droppedOff = new TripDroppedOffV1
             {
                 CorrelationId = trip.Id,
                 TripId = trip.Id,
@@ -355,12 +367,14 @@ public sealed class TripApplicationService : ITripApplicationService
                 IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
                 PayerAccount = $"rider-{trip.RiderId:D}",
                 PayeeAccount = $"driver-{trip.DriverId.Value:D}",
+                // Rider chưa chọn được phương thức trong app; mặc định ví SwiftRide.
+                PaymentMethod = "Wallet",
                 OccurredAtUtc = DateTimeOffset.UtcNow
             };
 
             try
             {
-                await _messageBus.SendPaymentAsync(payment, transactionCt);
+                await _messageBus.PublishAsync(droppedOff, transactionCt);
                 await _messageBus.ReleaseDriverAsync(
                     trip.DriverId.Value,
                     trip.Id,
@@ -498,6 +512,18 @@ public sealed class TripApplicationService : ITripApplicationService
         await ReleaseTripReservationsAsync(trip, "payment-failed", ct);
     }
 
+    public async Task<bool> AbandonPaymentAsync(Guid tripId, string reason, CancellationToken ct = default)
+    {
+        var trip = await GetTripAsync(tripId, ct);
+        if (trip.Status == TripStatus.Paid) return true;
+        if (trip.Status != TripStatus.PaymentPending) return false;
+
+        trip.RecordPaymentFailure(reason);
+        trip.MarkFailed();
+        await SaveAndNotifyAsync(trip, ct);
+        return false;
+    }
+
     public async Task HandlePaymentFaultAsync(ProcessPaymentV1 command, CancellationToken ct = default)
     {
         if (command.TripId == Guid.Empty || command.CorrelationId != command.TripId ||
@@ -584,7 +610,7 @@ public sealed class TripApplicationService : ITripApplicationService
         await _notifier.NotifyTripChangedAsync(ToResponse(trip), ct);
     }
 
-    private static TripResponse ToResponse(Trip trip) =>
+    private TripResponse ToResponse(Trip trip) =>
         new(
             trip.Id,
             trip.RiderId,
@@ -595,7 +621,9 @@ public sealed class TripApplicationService : ITripApplicationService
             trip.Status,
             trip.CreatedAt,
             trip.UpdatedAt,
-            trip.PaymentFailureReason);
+            trip.PaymentFailureReason,
+            trip.DeclineCount,
+            _optionsMonitor.CurrentValue.DeclineThreshold);
 }
 
 public sealed class TripMessagePublishException(Guid tripId, string message, Exception innerException)

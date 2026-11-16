@@ -16,6 +16,7 @@ public sealed class TripDbContext(DbContextOptions<TripDbContext> options)
     {
         // Áp dụng file cấu hình TripConfiguration
         modelBuilder.ApplyConfiguration(new TripConfiguration());
+        new TripPaymentSagaMap().Configure(modelBuilder);
         modelBuilder.AddInboxStateEntity();
         modelBuilder.AddOutboxMessageEntity();
         modelBuilder.AddOutboxStateEntity();

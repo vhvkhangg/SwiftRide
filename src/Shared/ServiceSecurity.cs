@@ -13,17 +13,12 @@ public static class ServiceSecurity
 {
     public static IServiceCollection AddServiceSecurity(this IServiceCollection services, IConfiguration config)
     {
-        var issuer = config["JwtSettings:Issuer"] ?? throw new InvalidOperationException("JWT issuer required.");
-        var audience = config["JwtSettings:Audience"] ?? throw new InvalidOperationException("JWT audience required.");
-        var key = Key(config, "JwtSettings:SecretKey");
         var internalKey = Key(config, "ServiceAuth:SecretKey");
-        if (key.SequenceEqual(internalKey))
-            throw new InvalidOperationException("User and service signing keys must differ.");
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
-                options.MapInboundClaims = false;
-                options.TokenValidationParameters = Parameters(key, issuer, audience);
+                // User tokens come from Keycloak (RS256, keys from JWKS); never from a shared secret.
+                KeycloakTokens.Configure(options, config);
                 options.Events = new JwtBearerEvents
                 {
                     OnMessageReceived = context =>
@@ -45,7 +40,7 @@ public static class ServiceSecurity
             .AddJwtBearer("Service", options =>
             {
                 options.MapInboundClaims = false;
-                options.TokenValidationParameters = Parameters(internalKey, "SwiftRide.Services", "SwiftRide.Internal");
+                options.TokenValidationParameters = InternalParameters(internalKey);
             });
         services.AddAuthorization(options =>
         {
@@ -81,15 +76,41 @@ public static class ServiceSecurity
         return key.Length >= 32 ? key : throw new InvalidOperationException(name + " must contain at least 32 bytes.");
     }
 
-    private static TokenValidationParameters Parameters(byte[] key, string issuer, string audience) => new()
+    private static TokenValidationParameters InternalParameters(byte[] key) => new()
     {
-        ValidateIssuer = true, ValidIssuer = issuer,
-        ValidateAudience = true, ValidAudience = audience,
+        ValidateIssuer = true, ValidIssuer = "SwiftRide.Services",
+        ValidateAudience = true, ValidAudience = "SwiftRide.Internal",
         ValidateIssuerSigningKey = true, IssuerSigningKey = new SymmetricSecurityKey(key),
         ValidateLifetime = true, RequireExpirationTime = true, RequireSignedTokens = true,
         ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
         RoleClaimType = "role", NameClaimType = "sub", ClockSkew = TimeSpan.FromSeconds(30)
     };
+}
+
+public static class KeycloakTokens
+{
+    /// <summary>Validates Keycloak access tokens: issuer, audience, RS256 signature from JWKS, lifetime.</summary>
+    public static void Configure(JwtBearerOptions options, IConfiguration config)
+    {
+        var authority = config["Authentication:Authority"]
+            ?? throw new InvalidOperationException("Authentication:Authority (Keycloak realm URL) required.");
+        var audience = config["Authentication:Audience"]
+            ?? throw new InvalidOperationException("Authentication:Audience required.");
+        options.Authority = authority;
+        var metadata = config["Authentication:MetadataAddress"];
+        if (!string.IsNullOrWhiteSpace(metadata)) options.MetadataAddress = metadata;
+        options.RequireHttpsMetadata = config.GetValue("Authentication:RequireHttpsMetadata", true);
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true, ValidIssuer = authority,
+            ValidateAudience = true, ValidAudience = audience,
+            ValidateIssuerSigningKey = true,
+            ValidateLifetime = true, RequireExpirationTime = true, RequireSignedTokens = true,
+            ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+            RoleClaimType = "role", NameClaimType = "sub", ClockSkew = TimeSpan.FromSeconds(30)
+        };
+    }
 }
 
 public sealed class InternalTripHandler(IConfiguration config) : DelegatingHandler

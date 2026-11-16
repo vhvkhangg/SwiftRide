@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Domain.Repositories;
 using SwiftRide.PaymentService.Infrastructure.Repositories;
+using SwiftRide.PaymentService.Application.PaymentMethods;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Api.Endpoints;
 using SwiftRide.PaymentService.Application.Integrations;
@@ -31,6 +32,10 @@ builder.Services.AddSwiftRideMessaging(
                 e.Name = MessagingEndpoints.PaymentProcessPayment;
             });
 
+        // Lệnh bù trừ (hoàn tiền) do Saga thanh toán bên Trip gửi.
+        x.AddConsumer<RefundPaymentConsumer>()
+            .Endpoint(e => e.Name = MessagingEndpoints.PaymentRefundPayment);
+
         x.AddEntityFrameworkOutbox<PaymentDbContext>(o =>
         {
             o.UsePostgres();
@@ -40,7 +45,7 @@ builder.Services.AddSwiftRideMessaging(
 
         x.AddConfigureEndpointsCallback((context, name, endpoint) =>
         {
-            if (name == MessagingEndpoints.PaymentProcessPayment)
+            if (name is MessagingEndpoints.PaymentProcessPayment or MessagingEndpoints.PaymentRefundPayment)
             {
                 endpoint.UseEntityFrameworkOutbox<PaymentDbContext>(
                     context);
@@ -61,9 +66,9 @@ builder.Services.AddScoped<
     IPaymentApplicationService,
     PaymentApplicationService>();
 
-builder.Services.AddScoped<
-    IPaymentDecisionService,
-    ApprovePaymentDecisionService>();
+// Factory pattern: tạo IPaymentMethod (Wallet/Card) theo PaymentMethod của lệnh thanh toán.
+builder.Services.AddSingleton<IPaymentMethodFactory, PaymentMethodFactory>();
+builder.Services.AddScoped<IPaymentDecisionService, PaymentMethodDecisionService>();
 
 builder.Services.AddServiceSecurity(builder.Configuration);
 

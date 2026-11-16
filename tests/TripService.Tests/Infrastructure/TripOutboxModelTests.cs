@@ -194,7 +194,7 @@ public sealed class TripOutboxModelTests
                 .ReturnsAsync(new MatchingQuoteResponse(0, 50, 10, 0, 0, 0, 6, 66));
             var service = new TripApplicationService(repository, repository, new TripWorkflowRepository(db),
                 new TripUnitOfWork(db), Mock.Of<ITripNotifier>(), pricing.Object, Mock.Of<ITripMessageBus>(),
-                Options.Create(new TripMatchingOptions()));
+                TestOptions.Monitor(new TripMatchingOptions()));
             return await service.CreateAsync(request, ct);
         }
         var results = await Task.WhenAll(Create(), Create());
@@ -278,7 +278,7 @@ public sealed class TripOutboxModelTests
                 });
             var service = new TripApplicationService(repository, reader.Object, new TripWorkflowRepository(db),
                 new TripUnitOfWork(db), Mock.Of<ITripNotifier>(), Mock.Of<IMatchingPricingClient>(),
-                Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+                Mock.Of<ITripMessageBus>(), TestOptions.Monitor(new TripMatchingOptions()));
             try
             {
                 if (cancelling) await service.CancelAsync(trip.Id, ct);
@@ -327,7 +327,7 @@ public sealed class TripOutboxModelTests
         var repository = new TripRepository(db);
         var service = new TripApplicationService(repository, repository, new TripWorkflowRepository(db),
             new TripUnitOfWork(db), Mock.Of<ITripNotifier>(), Mock.Of<IMatchingPricingClient>(),
-            Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+            Mock.Of<ITripMessageBus>(), TestOptions.Monitor(new TripMatchingOptions()));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.DriverAcceptAsync(trip.Id, new DriverAcceptRequest(driver), ct));
         await using var verify = new TripDbContext(database.Options);

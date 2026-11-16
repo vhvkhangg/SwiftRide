@@ -2,7 +2,7 @@ using System.Security.Claims;
 using SwiftRide.Security;
 
 // Include src/Shared/ServiceSecurity.cs and reference JwtBearer, as the real services do.
-// Configure JwtSettings and ServiceAuth via secrets/environment before running.
+// Configure Authentication (Keycloak authority/audience) and ServiceAuth via secrets/environment before running.
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddServiceSecurity(builder.Configuration);
 var app = builder.Build();

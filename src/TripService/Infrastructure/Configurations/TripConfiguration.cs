@@ -29,6 +29,9 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(t => t.MatchingAttempt)
             .HasDefaultValue(0);
 
+        builder.Property(t => t.DeclineCount)
+            .HasDefaultValue(0);
+
         builder.Property(t => t.PaymentFailureReason)
             .HasMaxLength(1000);
 

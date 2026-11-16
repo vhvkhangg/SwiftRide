@@ -5,8 +5,8 @@ services:
     ports: !override ["127.0.0.1::5432"]
   payment-postgres:
     ports: !override ["127.0.0.1::5432"]
-  auth-postgres:
-    ports: !override ["127.0.0.1::5432"]
+  keycloak:
+    ports: !override ["127.0.0.1::8080"]
   matching-mongodb:
     image: mongo:8.0.34
     ports: !override ["127.0.0.1::27017"]
@@ -14,7 +14,7 @@ services:
     ports: !override ["127.0.0.1::8080"]
     environment:
       TripMatching__InvitationTimeoutSeconds: 30
-      TripMatching__MaxAttempts: 3
+      TripMatching__DeclineThreshold: 2
   matching-service:
     ports: !override ["127.0.0.1::8080"]
   payment-service:

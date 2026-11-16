@@ -23,6 +23,11 @@ public static class MessagingTopology
         bus.Message<ProcessPaymentV1>(x => x.SetEntityName("swiftride-process-payment-v1"));
         bus.Message<PaymentSucceededV1>(x => x.SetEntityName("swiftride-payment-succeeded-v1"));
         bus.Message<PaymentFailedV1>(x => x.SetEntityName("swiftride-payment-failed-v1"));
+        // Saga thanh toán
+        bus.Message<TripDroppedOffV1>(x => x.SetEntityName("swiftride-trip-dropped-off-v1"));
+        bus.Message<TripPaymentTimedOutV1>(x => x.SetEntityName("swiftride-trip-payment-timed-out-v1"));
+        bus.Message<RefundPaymentV1>(x => x.SetEntityName("swiftride-refund-payment-v1"));
+        bus.Message<PaymentRefundedV1>(x => x.SetEntityName("swiftride-payment-refunded-v1"));
     }
 
     public static void ConfigureQueues(IRabbitMqBusFactoryConfigurator bus)
@@ -60,5 +65,20 @@ public static class MessagingTopology
 
         bus.ReceiveEndpoint(MessagingEndpoints.TripPaymentFailed,
             endpoint => endpoint.Bind<PaymentFailedV1>());
+
+        // Saga thanh toán nhận cả event của Trip và kết quả từ Payment; tạo trước để không mất message.
+        bus.ReceiveEndpoint(MessagingEndpoints.TripPaymentSaga, endpoint =>
+        {
+            endpoint.ConfigureConsumeTopology = false;
+            endpoint.Bind<TripDroppedOffV1>();
+            endpoint.Bind<TripPaymentTimedOutV1>();
+            endpoint.Bind<PaymentSucceededV1>();
+            endpoint.Bind<PaymentFailedV1>();
+            endpoint.Bind<Fault<ProcessPaymentV1>>();
+            endpoint.Bind<PaymentRefundedV1>();
+        });
+
+        bus.ReceiveEndpoint(MessagingEndpoints.PaymentRefundPayment,
+            endpoint => endpoint.ConfigureConsumeTopology = false);
     }
 }

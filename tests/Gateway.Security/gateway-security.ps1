@@ -1,5 +1,7 @@
 param(
     [string]$BaseUrl = "http://localhost:5100",
+    [string]$KeycloakUrl = "http://localhost:8180",
+    [string]$Realm = "swiftride",
     [string]$SeedPassword = "SwiftRide-demo-2026!",
     [string]$DirectTripUrl = "",
     [ValidateRange(5, 120)][int]$WaitSeconds = 45
@@ -18,8 +20,20 @@ function Call([string]$Method, [string]$Path, $Body, [string]$Token, [int[]]$Exp
     if ($response.StatusCode -eq 404) { return $null }
     if ($response.Content) { return $response.Content | ConvertFrom-Json }
 }
+$oidc = "$KeycloakUrl/realms/$Realm/protocol/openid-connect"
+function TokenRequest([hashtable]$Form) {
+    Invoke-WebRequest "$oidc/token" -Method Post -Body $Form -ContentType "application/x-www-form-urlencoded" -SkipHttpErrorCheck -TimeoutSec 15
+}
 function Login([string]$Email) {
-    (Call POST "/auth/login" @{email=$Email;password=$SeedPassword} "" 200).accessToken
+    # Tokens are issued by Keycloak; swiftride-postman is the dev/test-only password-grant client.
+    $response = TokenRequest @{grant_type="password";client_id="swiftride-postman";scope="openid";username=$Email;password=$SeedPassword}
+    if ([int]$response.StatusCode -ne 200) { throw "Keycloak login failed for $Email with HTTP $($response.StatusCode)." }
+    $script:checks++
+    ($response.Content | ConvertFrom-Json).access_token
+}
+function Identity([string]$Token) {
+    $script:checks++
+    Invoke-RestMethod "$oidc/userinfo" -Headers @{Authorization="Bearer $Token"} -TimeoutSec 15
 }
 function NewTrip([string]$Token) {
     Call POST "/api/trips/" @{
@@ -36,19 +50,21 @@ function WaitInvitation([string]$TripId, [string]$Token) {
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Invitation timeout for $TripId. Check matching consumer, candidate data and error queues."
 }
-$null = Call GET "/auth/me" $null "" 401
-$tag = [guid]::NewGuid().ToString("N")
-$email = "security-$tag@example.com"
-$otherEmail = "other-$tag@example.com"
-$null = Call POST "/auth/register" @{email=$email;password=$SeedPassword;role="Admin"} "" 201
-$null = Call POST "/auth/register" @{email=$otherEmail;password=$SeedPassword} "" 201
-$rider = Login $email
-$other = Login $otherEmail
+$null = Call GET "/api/trips/active" $null "" 401
+$wrong = TokenRequest @{grant_type="password";client_id="swiftride-postman";username="rider.demo@example.com";password="Wrong-password-2026!"}
+if ([int]$wrong.StatusCode -ne 401) { throw "Keycloak accepted a wrong password." }
+$mobile = TokenRequest @{grant_type="password";client_id="swiftride-mobile";username="rider.demo@example.com";password=$SeedPassword}
+if ([int]$mobile.StatusCode -notin @(400, 401)) { throw "Mobile client must use Authorization Code + PKCE, not password grant." }
+$checks += 2
+$rider = Login "rider.demo@example.com"
+$other = Login "rider.other@example.com"
 $driver = Login "driver.demo@example.com"
 $driverOther = Login "driver.other@example.com"
-$me = Call GET "/auth/me" $null $rider 200
-if ($me.roles -notcontains "Rider" -or $me.roles -contains "Admin") { throw "Public role escalation." }
-$driverMe = Call GET "/auth/me" $null $driver 200
+$me = Identity $rider
+if ($me.role -notcontains "Rider" -or $me.role -contains "Admin" -or $me.role -contains "Driver") { throw "Rider token carries privileged roles." }
+$me | Add-Member -NotePropertyName id -NotePropertyValue $me.sub
+$driverMe = Identity $driver
+$driverMe | Add-Member -NotePropertyName id -NotePropertyValue $driverMe.sub
 $null = Call GET "/api/trips/driver/invitations" $null "" 401
 $null = Call GET "/api/trips/driver/invitations" $null "invalid-token" 401
 $null = Call GET "/api/trips/driver/invitations" $null $rider 403

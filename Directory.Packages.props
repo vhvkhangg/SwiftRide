@@ -12,7 +12,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
 
     <!-- API Gateway -->
-    <PackageVersion Include="Ocelot" Version="25.0.1" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
 
     <!-- Relational data: Trip + Payment -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />

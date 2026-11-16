@@ -1,132 +1,143 @@
-# Gateway và Authentication
+# Gateway và Authentication (Keycloak)
 
-Hợp đồng HTTP/SignalR cho mobile và workflow mới: [mobile-api-contract.md](mobile-api-contract.md). Task 1 ngày 26/10/2026 đã kiểm tra transport qua Gateway thật và Auth smoke trên PostgreSQL thật; smoke nghiệp vụ còn phụ thuộc Docker Engine. Blocker build Matching đã sửa.
+Hợp đồng HTTP/SignalR cho mobile: [mobile-api-contract.md](mobile-api-contract.md).
 
-SwiftRide dùng Ocelot trên .NET 10; Auth nằm ngay trong ApiGateway, database Auth là PostgreSQL. Gateway phát JWT HS256 và refresh token rotation. EF Core/Npgsql dùng phiên bản tập trung trong Directory.Packages.props.
+SwiftRide dùng **Keycloak** làm Identity Provider theo chuẩn **OAuth 2.0 / OpenID Connect**. Keycloak quản lý user, mật khẩu, vai trò, phiên đăng nhập và cấp access token **RS256**. API Gateway (YARP) và ba service **không phát token, không lưu mật khẩu**; chúng chỉ kiểm tra token bằng public key (JWKS) của Keycloak.
 
-## URL công khai
+```text
+Rider/Driver app ──(Authorization Code + PKCE)──► Keycloak realm "swiftride"
+        │                                              │ access token RS256 (iss, aud=swiftride-api, sub, role)
+        ▼                                              ▼
+   API Gateway (YARP)   ── kiểm tra JWT qua JWKS ── Trip / Matching / Payment (kiểm tra lại JWT)
+```
 
-| Client gọi Gateway | Downstream |
+## Realm `swiftride`
+
+Cấu hình nằm trong [keycloak/swiftride-realm.json](../keycloak/swiftride-realm.json), import tự động khi Keycloak khởi động lần đầu (`start-dev --import-realm`).
+
+| Thành phần | Giá trị |
 |---|---|
-| /api/trips/* | TripService /trips/* |
-| /api/payments/* | PaymentService /payments/* |
-| POST /api/matching/quote | MatchingService /quote |
-| POST /api/matching/match | MatchingService /match |
-| POST /api/drivers/location | MatchingService /api/drivers/location |
-| /auth/* | Controllers nội bộ Gateway |
+| Vai trò realm | `Rider`, `Driver`, `Admin` |
+| Default role khi tự đăng ký | chỉ `Rider` (composite `default-roles-swiftride`) |
+| Claim trong access token | `sub` (UUID user Keycloak), `email`, `role` (mảng vai trò realm), `aud` = `swiftride-api` |
+| Access token TTL | 15 phút; refresh token xoay vòng (`revokeRefreshToken`), không cho dùng lại |
+| Mật khẩu | tối thiểu 12 ký tự, khác username; brute-force protection bật |
+| Tự đăng ký | bật (email làm username); người dùng tự đăng ký luôn là Rider |
 
-Products/Orders vẫn là route minh họa, chưa có service trong Compose. Không có route public vào /internal/*.
+Client OIDC:
 
-Routes nằm trong src/ApiGateway/ocelot.json. Compose override host/port theo index 0=Trip, 1=Quote, 2=Payment, 6=Match, 7=DriverLocation. Khi đổi thứ tự Routes phải cập nhật Compose.
+| Client | Loại | Luồng | Dùng cho |
+|---|---|---|---|
+| `swiftride-mobile` | public | Authorization Code + **PKCE S256**; không cho password grant | App Rider/Driver (redirect `swiftride-rider://*`, `swiftride-driver://*`, Expo `exp://*`, web preview `http://localhost:8081/*`) |
+| `swiftride-postman` | public | Password grant (Direct Access Grants) | **Chỉ dev/test**: Postman/Newman, `tests/System/messaging.py`, `tests/Gateway.Security/*`. Tắt client này ở production |
 
-## Xác thực nhất quán
+Tài khoản demo (chỉ import ở môi trường dev; mật khẩu lấy từ `DEV_ACCOUNT_PASSWORD`, mặc định `SwiftRide-demo-2026!`):
 
-Gateway xác thực JWT trước khi proxy. IdentityHeaders handler luôn strip X-User-Id/Email/Roles do client gửi và có thể gắn lại claims đã xác thực để quan sát. Header Authorization được giữ để mỗi downstream tự validate JWT qua src/Shared/ServiceSecurity.cs. Services hoàn toàn không lấy quyền từ X-User-*.
-
-Các service dùng cùng JwtSettings:SecretKey/Issuer/Audience với Gateway. HS256 là mô hình tin cậy chung cho các service trong demo; production có thể chuyển sang ký bất đối xứng để downstream chỉ giữ public key. TLS cần được cấu hình ở edge và mạng giữa services theo deployment.
-
-Mọi business endpoint yêu cầu authentication. Health cho phép anonymous. Truy cập trực tiếp service bằng header giả mà không có JWT trả 401.
-
-## Tài khoản và vai trò
-
-POST /auth/register nhận email/password và luôn tạo Rider; role/ID client gửi không được dùng để cấp quyền. Password 12–128 ký tự, Identity PasswordHasher PBKDF2. Email được normalize, có unique index.
-
-POST /auth/login trả accessToken, refreshToken và accessTokenExpiresAtUtc. Legacy role User được chuyển thành Rider khi đăng nhập; token cũ phải thay bằng token mới.
-
-GET /auth/me cần JWT, trả id/email/roles từ user trong AuthDb. Không trả password hash hoặc refresh token. Role mới dùng cho authorization có hiệu lực khi cấp access token mới.
-
-Driver chỉ được cấp qua quy trình tin cậy: môi trường Development có seed demo; production cần nhân sự vận hành xác minh tài xế rồi provision Role=Driver trong AuthDb bằng công cụ quản trị hạn chế quyền. Không có public API tự nâng vai trò. Khi đổi role/thu hồi quyền cần revoke refresh families và xử lý access tokens hiện có (TTL mặc định 15 phút, skew 30 giây); chưa có cơ chế vô hiệu hóa JWT tức thời.
-
-Seed chỉ chạy khi Environment=Development và DevelopmentAccounts:Enabled=true. Tạo tài khoản chưa tồn tại, không thay mật khẩu/role của user đã tồn tại:
 - rider.demo@example.com — Rider
+- rider.other@example.com — Rider (dùng để kiểm tra ownership)
 - driver.demo@example.com — Driver
 - driver.other@example.com — Driver
+- admin.demo@example.com — Admin (refund)
 
-Mật khẩu lấy từ DevelopmentAccounts:Password; Compose local mặc định SwiftRide-demo-2026!, có thể override DEV_ACCOUNT_PASSWORD. Tắt seed ở production. Nếu email demo đã bị đăng ký trước, seed không tự nâng quyền; cần kiểm tra tài khoản bằng /auth/me.
+Driver và Admin chỉ được cấp qua Keycloak Admin Console (`http://localhost:8180/admin`, tài khoản `KEYCLOAK_ADMIN_USER`/`KEYCLOAK_ADMIN_PASSWORD`). Không có API công khai để tự nâng vai trò. Đổi role có hiệu lực ở access token kế tiếp; token đã cấp vẫn hợp lệ tới khi hết hạn (tối đa 15 phút + 30 giây lệch giờ).
 
-## Refresh token
+Realm chỉ được import khi chưa tồn tại. Sau khi sửa `swiftride-realm.json`, cập nhật qua Admin Console, hoặc (chỉ trên môi trường dev, chấp nhận mất user/phiên) xóa volume `keycloak-postgres-data` để import lại.
 
-POST /auth/refresh-token và POST /auth/revoke nhận {"refreshToken":"<secret>"}. Refresh secret sinh bằng CSPRNG 64 bytes, database chỉ lưu SHA-256 hash. Transaction ReadCommitted và SELECT FOR UPDATE đảm bảo một token chỉ rotate thành công một lần. Dùng lại token revoked thu hồi cả family. Client serialize các refresh requests và thay cặp token atomically; strict replay có thể yêu cầu đăng nhập lại nếu response bị mất.
+## Endpoint OIDC (thay cho `/auth/*` cũ)
 
-Revoke idempotent trả 204 và thu hồi family, không thu hồi các phiên đăng nhập khác. JWT cũ vẫn hợp lệ tới khi hết hạn. Response token có Cache-Control: no-store. Không log token hoặc đặt trong URL.
+Gốc: `{KEYCLOAK_PUBLIC_URL}/realms/swiftride/protocol/openid-connect`.
+
+| Việc | Endpoint |
+|---|---|
+| Discovery | `GET /realms/swiftride/.well-known/openid-configuration` |
+| Đăng nhập (mobile) | `GET .../auth?client_id=swiftride-mobile&response_type=code&code_challenge=…&code_challenge_method=S256&redirect_uri=…` |
+| Đăng ký (mobile) | `GET .../registrations?client_id=swiftride-mobile&…` (trang đăng ký Keycloak) |
+| Đổi code / refresh / password grant (test) | `POST .../token` (form-urlencoded) |
+| Thông tin user | `GET .../userinfo` với Bearer token → `sub`, `email`, `role` |
+| Đăng xuất | `POST .../logout` với `client_id` + `refresh_token` → 204 |
+| Public keys | `GET .../certs` (JWKS) |
+
+Gateway không còn `/auth/register`, `/auth/login`, `/auth/me`, `/auth/refresh-token`, `/auth/revoke`, không còn AuthDb.
+
+## Kiểm tra token ở Gateway và service
+
+Cấu hình chung (`Authentication:*`, xem `KeycloakTokens` trong [ServiceSecurity.cs](../src/Shared/ServiceSecurity.cs)):
+
+| Khóa | Ý nghĩa |
+|---|---|
+| `Authentication:Authority` | Issuer công khai, ví dụ `http://localhost:8180/realms/swiftride`. Token phải có đúng `iss` này |
+| `Authentication:MetadataAddress` | Địa chỉ discovery nội bộ (trong Compose: `http://keycloak:8080/...`) |
+| `Authentication:Audience` | `swiftride-api` |
+| `Authentication:RequireHttpsMetadata` | `false` chỉ cho dev; production dùng HTTPS |
+
+Token chỉ hợp lệ khi đủ: chữ ký RS256 khớp JWKS, đúng issuer, đúng audience, còn hạn, `sub` là GUID khác rỗng. Token HS256, `alg: none`, ký bằng khóa khác hoặc bị sửa payload đều bị từ chối (401).
+
+Keycloak đặt `KC_HOSTNAME` = `KEYCLOAK_PUBLIC_URL` nên `iss` luôn cố định dù client gọi qua cổng nào; container lấy JWKS qua backchannel `keycloak:8080` (`KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`). Khi chạy app trên điện thoại thật, đặt `KEYCLOAK_PUBLIC_URL` thành địa chỉ LAN của máy (ví dụ `http://192.168.1.10:8180`) để token có issuer mà điện thoại truy cập được.
+
+Gateway xác thực JWT trước khi proxy. IdentityHeaders handler luôn xóa `X-User-*` do client gửi; header Authorization được giữ để mỗi service tự xác thực lại. Service không lấy quyền từ `X-User-*`. `GET /health` là liveness; `GET /health/ready` của Gateway trả 503 khi không đọc được discovery của Keycloak.
 
 ## Quyền nghiệp vụ
 
-- Rider tạo chuyến: RiderId được ghi đè từ sub của JWT.
+- Rider tạo chuyến: RiderId lấy từ `sub` của token, body bị bỏ qua.
 - Rider chỉ xem/hủy chuyến của mình; state machine vẫn kiểm tra trạng thái được hủy.
-- Driver chỉ xem/cập nhật chuyến đã được giao. Không được tạo chuyến thay Rider.
-- Vị trí Driver luôn dùng DriverId từ JWT; DriverId trong body bị bỏ qua.
-- Rider xác nhận giá qua /api/trips/{id}/confirm-price trước khi Trip gửi matching command. /api/matching/match chỉ trả ứng viên, không tạo lời mời.
-- GET /api/trips/driver/invitations chỉ trả lời mời chưa xử lý, chưa hết hạn của Driver đang đăng nhập.
-- Driver nhận/từ chối chuyến phải có invitation còn hạn, Trip PriceConfirmed và chưa có Driver. ID ở body không được dùng. PostgreSQL xmin concurrency token bảo vệ cập nhật cùng chuyến.
-- Driver dropoff nhận 202; Trip lưu PaymentPending và payment command qua transaction/outbox. Mobile chờ event hoặc poll Paid, không POST payment lần nữa.
-- Rider chỉ tạo/xem payment cho chuyến mình. Ownership được kiểm tra trước cả nhánh retry idempotency.
-- Refund/reconcile chỉ Admin. Chưa có public API cấp Admin.
-- User JWT không gọi được pay/fail/payment-pending của Trip. Các policy này yêu cầu credential nội bộ; không thể giả role bằng header.
+- Driver chỉ xem/cập nhật chuyến đã được giao, không tạo chuyến thay Rider.
+- Vị trí Driver luôn dùng DriverId từ token; DriverId trong body bị bỏ qua.
+- Rider xác nhận giá qua `/api/trips/{id}/confirm-price` trước khi Trip gửi matching command. `/api/matching/match` chỉ trả ứng viên.
+- `GET /api/trips/driver/invitations` chỉ trả lời mời chưa xử lý, chưa hết hạn của Driver đang đăng nhập.
+- Driver nhận/từ chối chuyến phải có invitation còn hạn, Trip `PriceConfirmed` và chưa có Driver. Tài xế đã từ chối bị loại khỏi lần tìm kế tiếp.
+- Driver dropoff nhận 202; Trip lưu `PaymentPending` và payment command qua transaction/outbox.
+- Rider chỉ xem payment của chuyến mình. Refund chỉ Admin.
+- User token không gọi được pay/fail/payment-pending của Trip; các policy này yêu cầu credential nội bộ.
 
-Payment hiện là mô phỏng ledger/thanh toán trong bài tập, chưa tích hợp nhà cung cấp thanh toán thật. Trip lấy giá qua Pricing nội bộ, không nhận FareEstimate làm giá từ client. Distance/time vẫn cần được xác minh phía server trước khi dùng tiền thật.
+Payment là mô phỏng ledger trong bài tập, chưa tích hợp nhà cung cấp thanh toán thật.
 
 ## Service-to-service
 
-ServiceAuth:SecretKey tách khỏi JwtSettings:SecretKey. Service JWT có issuer SwiftRide.Services, audience SwiftRide.Internal, TTL 1 phút; không phát cho FE:
-- payment-service: đọc internal Trip snapshot và gọi /internal/trips/{id}/pay.
-- matching-service: đọc snapshot và tạo /internal/trips/{id}/invitations.
+Gọi nội bộ giữa service vẫn dùng token HS256 riêng (`ServiceAuth:SecretKey`, issuer `SwiftRide.Services`, audience `SwiftRide.Internal`, TTL 1 phút), tách hoàn toàn khỏi token người dùng:
 
-InternalTripHandler cấp token theo từng request. Endpoints /internal/* không được proxy bởi Ocelot. Secrets nội bộ phải giới hạn trong mạng backend. Mô hình shared secret cho trusted services; nếu cần cô lập từng service, triển khai asymmetric credentials hoặc workload identity riêng.
+- payment-service: đọc internal Trip snapshot và gọi `/internal/trips/{id}/pay`.
+- matching-service: đọc snapshot và tạo `/internal/trips/{id}/invitations`.
+- trip-service: gọi `/internal/quote` của Matching.
+
+Endpoints `/internal/*` không có route trong YARP nên không ra được ngoài Gateway. Hướng nâng cấp: chuyển sang Keycloak client credentials (mỗi service một confidential client).
 
 ## Chạy Docker
 
-Compose có secrets mặc định chỉ dành cho local/test. Có thể copy .env.example thành .env để override AUTH_DB_PASSWORD, JWT_SECRET_KEY và SERVICE_AUTH_SECRET_KEY. Hai signing keys phải khác nhau, mỗi key ít nhất 32 bytes; không commit file .env. Không dùng secrets mặc định ở production.
-
-~~~powershell
+```powershell
 docker compose up --build -d
-docker compose logs -f api-gateway
-pwsh -File tests/Gateway.Security/gateway-security.ps1
-~~~
+docker compose logs -f keycloak api-gateway
+```
 
-Compose bật DevelopmentAccounts và giữ EnsureCreated cho database local legacy. Database Auth mới nên dùng `AUTH_DB_MIGRATE=true` và `AUTH_DB_ENSURE_CREATED=false`; overlay kiểm thử Task 1 đã bật hai giá trị này. Trip/Payment dùng Database:Migrate=true. Production nên chạy migration bằng deployment job riêng, tắt auto-migrate/seed và thiết lập secrets/TLS/network policy.
+Compose có giá trị mặc định chỉ dành cho local/test. Copy `.env.example` thành `.env` để override `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_DB_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, `SERVICE_AUTH_SECRET_KEY`, `DEV_ACCOUNT_PASSWORD`. Không commit `.env`.
 
-PostgreSQL Auth local: localhost:5435, database swiftride_auth, username swiftride, password AUTH_DB_PASSWORD. Trip:5433, Payment:5434, Mongo:27017.
+| Thành phần | Địa chỉ local |
+|---|---|
+| API Gateway | http://localhost:5100 |
+| Keycloak (issuer, login, admin console) | http://localhost:8180 |
+| Keycloak database | container `keycloak-postgres` (không mở cổng ra host) |
 
-## Chạy local
+Production: chạy Keycloak bằng `start` (không `start-dev`) sau HTTPS, tắt client `swiftride-postman`, không import user demo, đặt `RequireHttpsMetadata=true`.
 
-Cần SDK/runtime .NET 10. Cấu hình ConnectionStrings của từng service và JwtSettings/ServiceAuth bằng environment hoặc user-secrets. Nếu đổi connection string trong appsettings, lưu ý user-secrets/environment có độ ưu tiên cao hơn.
+## Chạy service ngoài Docker
 
-~~~powershell
-$env:JwtSettings__SecretKey = "<generated-user-key>"
-$env:ServiceAuth__SecretKey = "<different-generated-internal-key>"
+```powershell
+$env:Authentication__Authority = "http://localhost:8180/realms/swiftride"
+$env:Authentication__Audience = "swiftride-api"
+$env:Authentication__RequireHttpsMetadata = "false"
+$env:ServiceAuth__SecretKey = "<generated-internal-key-at-least-32-bytes>"
 dotnet run --project src/TripService --urls http://localhost:5101
-~~~
+```
 
-Đặt `AuthDatabase__Migrate=true` và `Database__Migrate=true` khi cần áp dụng migrations local. `AuthDatabase__EnsureCreated` chỉ giữ cho bootstrap legacy database mới trong Development; không bật cùng migration trên cùng database.
-
-Migration DriverInvitationsAndConcurrency thêm bảng invitation và mapping xmin của PostgreSQL. Không xóa volume/database cũ để nâng cấp; áp dụng migration Trip.
-
-### Auth migrations
-
-Database Auth mới có thể chạy `dotnet ef database update --project src/ApiGateway --context AuthDbContext` với connection string và secrets đã cấu hình, hoặc bật `AuthDatabase__Migrate=true`. Chạy lại không tạo bảng hoặc migration history trùng. `GET /health` là liveness; `GET /health/ready` kiểm tra truy vấn được cả Users và RefreshTokens, trả 503 nếu database/schema chưa sẵn sàng.
-
-Database Auth cũ tạo bằng EnsureCreated chưa có migration history. Không bật Migrate trực tiếp: initial migration sẽ từ chối tạo lại bảng, không tự xóa hoặc sửa dữ liệu. Sao lưu bằng pg_dump, tạo SQL bằng `dotnet ef migrations script --project src/ApiGateway --context AuthDbContext`, đối chiếu schema thực tế và nhờ người vận hành review/baseline migration `20261108052137_InitialAuthSchema` trước khi chuyển sang migrations. Không tự ghi history khi chưa đối chiếu, không xóa volume để vượt lỗi.
-
-### Task 1 acceptance
-
-Chạy từ repo root: `pwsh -NoProfile -File tests/Gateway.Security/task1.ps1`. Runner tạo Compose project riêng, dùng loopback ports 15100-15103 và database test riêng; không chạy trên production hoặc khi ports này đang được dùng. Mặc định gỡ containers/network sau khi chạy, giữ volumes. `-KeepRunning` giữ stack để chẩn đoán.
-
-Runner kiểm tra initial migration và restart không tạo history trùng, refresh token còn dùng được sau restart Gateway, readiness 503 khi Auth PostgreSQL dừng, auth rotation/replay/logout/concurrency, rate limit 20 requests/phút, rồi luồng Trip/Matching/Payment thật qua Gateway và SignalR recipient isolation. Gateway được restart giữa các suite để reset cửa sổ rate limit, không tắt rate limiting. Workflow CI chạy runner sau system recovery suite; kết quả local không đồng nghĩa GitHub CI đã chạy.
+Keycloak vẫn chạy trong Compose (`docker compose up -d keycloak`).
 
 ## Kiểm chứng
 
-~~~powershell
-# PowerShell 7, stack backend chạy và seed Development được bật
-pwsh -File tests/Gateway.Security/gateway-security.ps1
-# Regression refresh/logout; chờ một phút giữa các suite nếu cùng IP
-pwsh -File tests/ApiGateway.Smoke/auth-smoke.ps1
-~~~
-
-Rate limit Auth 20 requests/phút/IP/process; chạy nhiều suite liên tiếp có thể bị 429. Script tạo tài khoản/chuyến/payment test, không xóa dữ liệu nghiệp vụ sẵn có.
+- Unit test: `tests/Shared/TestOidcIssuer.cs` giả lập realm (RS256 + discovery/JWKS) để kiểm tra Gateway và service thật từ chối token sai khóa, sai issuer, sai audience, hết hạn.
+- Postman: [postman/README.md](../postman/README.md) — đăng nhập qua Keycloak, kiểm tra token giả và toàn bộ luồng nghiệp vụ.
+- Full stack: `pwsh -NoProfile -File tests/Gateway.Security/task1.ps1` (Compose project riêng, cổng 15100-15103 và Keycloak 18180) kiểm tra token qua restart Gateway/Keycloak, readiness 503 khi Keycloak dừng, logout vô hiệu refresh token, rồi chạy `gateway-security.ps1`.
 
 Nguồn chính thức:
-- https://ocelot.readthedocs.io/en/latest/features/authentication.html
-- https://ocelot.readthedocs.io/en/latest/features/delegatinghandlers.html
+- https://www.keycloak.org/server/importExport
+- https://www.keycloak.org/server/hostname
+- https://learn.microsoft.com/aspnet/core/fundamentals/servers/yarp/yarp-overview
 - https://learn.microsoft.com/aspnet/core/security/authentication/configure-jwt-bearer-authentication
-- https://www.npgsql.org/efcore/modeling/concurrency.html

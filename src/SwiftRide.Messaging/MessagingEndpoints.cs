@@ -16,4 +16,6 @@ public static class MessagingEndpoints
     public const string PaymentProcessPayment = "swiftride-payment-process-payment";
     public const string TripPaymentSucceeded = "swiftride-trip-payment-succeeded";
     public const string TripPaymentFailed = "swiftride-trip-payment-failed";
+    public const string TripPaymentSaga = "swiftride-trip-payment-saga";
+    public const string PaymentRefundPayment = "swiftride-payment-refund-payment";
 }

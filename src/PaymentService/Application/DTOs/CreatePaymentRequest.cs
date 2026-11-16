@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using SwiftRide.PaymentService.Domain.Enums;
 
 namespace SwiftRide.PaymentService.Application.DTOs
 {
@@ -10,6 +11,7 @@ namespace SwiftRide.PaymentService.Application.DTOs
         decimal Amount,
         string IdempotencyKey,
         string PayerAccount,
-        string PayeeAccount
+        string PayeeAccount,
+        PaymentMethodType PaymentMethod = PaymentMethodType.Wallet
     );
 }

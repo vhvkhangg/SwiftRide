@@ -13,5 +13,7 @@ public sealed record TripResponse(
     TripStatus Status,
     DateTime CreatedAt,
     DateTime? UpdatedAt,
-    string? PaymentFailureReason
+    string? PaymentFailureReason,
+    int DeclineCount = 0,
+    int? DeclineThreshold = null
 );

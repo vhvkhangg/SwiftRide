@@ -1,3 +1,4 @@
+using SwiftRide.TripService.Application.Sagas;
 using MassTransit;
 using SwiftRide.Security;
 using SwiftRide.Messaging;
@@ -10,6 +11,11 @@ using SwiftRide.TripService.Application.Consumers;
 using SwiftRide.TripService.Application.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+// Tham số matching (ngưỡng từ chối k, TTL lời mời, bán kính) đổi được khi đang chạy: file tự nạp lại.
+// Biến môi trường thêm lại sau để vẫn ghi đè được file (dùng cho bộ test).
+builder.Configuration
+    .AddJsonFile("config/trip-matching.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
 builder.Services.AddDbContext<TripDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("TripDb")));
@@ -26,6 +32,15 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentFailed);
     consumers.AddConsumer<PaymentFaultConsumer>()
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentFault);
+    // Saga thanh toán (orchestration): trạng thái lưu trong TripDB, cùng DbContext/Outbox với Trip.
+    consumers.AddSagaStateMachine<TripPaymentStateMachine, TripPaymentSagaState>()
+        .EntityFrameworkRepository(repository =>
+        {
+            repository.ConcurrencyMode = ConcurrencyMode.Optimistic;
+            repository.ExistingDbContext<TripDbContext>();
+            repository.UsePostgres();
+        })
+        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentSaga);
     consumers.AddEntityFrameworkOutbox<TripDbContext>(options =>
     {
         options.UsePostgres();
@@ -37,7 +52,8 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
         if (name is MessagingEndpoints.TripDriverFoundForTrip or
             MessagingEndpoints.TripNoDriverFoundForTrip or
             MessagingEndpoints.TripPaymentSucceeded or
-            MessagingEndpoints.TripPaymentFailed or MessagingEndpoints.TripPaymentFault)
+            MessagingEndpoints.TripPaymentFailed or MessagingEndpoints.TripPaymentFault or
+            MessagingEndpoints.TripPaymentSaga)
         {
             endpoint.UseEntityFrameworkOutbox<TripDbContext>(context);
         }
@@ -45,6 +61,9 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
 });
 
 builder.Services.AddServiceSecurity(builder.Configuration);
+builder.Services.Configure<TripPaymentSagaOptions>(builder.Configuration.GetSection("TripPayment"));
+builder.Services.AddScoped<AbandonTripPaymentActivity>();
+builder.Services.AddHostedService<PaymentSagaTimeoutWorker>();
 builder.Services.AddSignalR();
 builder.Services.Configure<TripMatchingOptions>(builder.Configuration.GetSection("TripMatching"));
 builder.Services.AddHttpContextAccessor();
@@ -68,6 +87,12 @@ builder.Services.AddScoped<SwiftRide.TripService.Application.Interfaces.ITripApp
 builder.Services.AddHostedService<SwiftRide.TripService.Application.Services.DriverInvitationTimeoutWorker>();
 
 var app = builder.Build();
+var matchingLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("TripMatching");
+var matchingOptions = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<TripMatchingOptions>>();
+matchingOptions.CurrentValue.Validate();
+matchingOptions.OnChange((o, _) => matchingLog.LogInformation(
+    "TripMatching changed at runtime: DeclineThreshold(k)={K}, InvitationTimeoutSeconds={Ttl}, SearchRadiusKm={Radius}",
+    o.DeclineThreshold, o.InvitationTimeoutSeconds, o.SearchRadiusKm));
 
 // Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
 app.MapHealthChecks("/health/ready").AllowAnonymous();

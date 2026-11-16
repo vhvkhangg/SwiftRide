@@ -1,182 +1,197 @@
 # SwiftRide
 
-SwiftRide là bài tập lớn môn **Kiến trúc Phần mềm**. Hệ thống mô phỏng một nền tảng đặt xe hai phía, kết nối **rider** (người đi) và **driver** (tài xế), với trọng tâm là thiết kế kiến trúc microservices, SOLID và các design pattern phù hợp.
+SwiftRide là bài tập lớn môn **Kiến trúc Phần mềm** (Trường Đại học Sài Gòn, HK I 2026–2027). Hệ thống mô phỏng sàn đặt xe hai phía, kết nối **rider** (người đi) và **driver** (tài xế), xây dựng theo kiến trúc **microservices** trên **.NET 10**.
 
-## 1. Phạm vi core
+📄 **Báo cáo kiến trúc đầy đủ:** [docs/architecture-report.md](docs/architecture-report.md). Báo cáo đi theo 9 mục của đề và có sơ đồ, SOLID, design pattern, trade-off, bằng chứng kiểm thử.
 
-Repository scaffold này ưu tiên **luồng cơ bản chạy được trước**. Core gồm:
+## 1. Thành phần
 
-- **API Gateway** dùng Ocelot, là điểm vào chung cho client.
-- **Trip Service** quản lý vòng đời chuyến đi / state machine.
-- **Matching & Pricing Service** tìm tài xế và tính giá.
-- **Payment Service** xử lý thanh toán, ledger/refund và idempotency ở giai đoạn triển khai nghiệp vụ.
-- JWT Bearer dependency được khai báo để triển khai authentication/authorization trong core.
-- Docker Compose cho toàn bộ backend và 3 database logic riêng.
-- xUnit + Moq cho kiểm thử.
-
-**RabbitMQ/MassTransit** đã có hạ tầng và luồng tạo chuyến, phát `TripRequestedV1`, nhận tại MatchingService để tìm tài xế gần. Xem [hướng dẫn messaging](docs/messaging.md) để chạy và đọc code. Transactional Outbox, OpenTelemetry và Saga chưa được triển khai.
-
-Frontend chính chuyển sang **React Native + Expo + TypeScript** trong `mobile/`: hai ứng dụng **SwiftRide Rider** và **SwiftRide Driver** có entry, tên, icon, application ID và cấu hình build độc lập. UI dùng thành phần native, không bọc web bằng WebView. Bản demo chưa gọi backend, hai app chưa đồng bộ chuyến. Xem `mobile/README.md` để chạy trên điện thoại và build Android.
-
-Bản React/Vite cũ đã được gỡ bỏ. Chỉ phát triển giao diện trong `mobile/`, bao gồm cả preview web bằng Expo.
+| Thành phần | Vai trò | Công nghệ / dữ liệu |
+|---|---|---|
+| **API Gateway** | Điểm vào duy nhất, định tuyến, xác thực JWT, proxy SignalR | YARP |
+| **Keycloak** | Identity Provider: đăng ký, đăng nhập, vai trò Rider/Driver/Admin, cấp token RS256 | Keycloak 26 (OAuth 2.0 / OIDC) + PostgreSQL riêng |
+| **Trip Service** | Vòng đời chuyến (State pattern), lời mời tài xế, điều phối Saga, SignalR | PostgreSQL `TripDB` |
+| **Matching & Pricing Service** | Tìm và giữ chỗ tài xế bằng geo-query, tính giá (Strategy) | MongoDB `MatchDB` |
+| **Payment Service** | Thanh toán qua message, sổ cái kép, idempotency, refund | PostgreSQL `PayDB` |
+| **RabbitMQ** | Command/event giữa các service, Transactional Outbox/Inbox | RabbitMQ 4 + MassTransit 8 |
+| **Mobile** | App Rider và Driver | React Native + Expo + TypeScript (`mobile/`) |
 
 ## 2. Kiến trúc
 
-```text
-Client (React Native: Rider / Driver; demo chưa nối API)
-        |
-        v
-API Gateway (Ocelot + JWT)
-        |
-        +--------------------+--------------------+
-        |                    |                    |
-        v                    v                    v
- Trip Service       Matching/Pricing       Payment Service
-        |                    |                    |
-        v                    v                    v
- PostgreSQL              MongoDB               PostgreSQL
-  TripDB                 MatchDB                PayDB
+```mermaid
+flowchart LR
+    C["Rider / Driver App<br/>Postman"] -- "đăng nhập" --> KC["Keycloak"]
+    C -- "Bearer token, SignalR" --> GW["API Gateway<br/>YARP"]
+    GW -. "JWKS" .-> KC
+    GW --> T["Trip"] & M["Matching & Pricing"] & P["Payment"]
+    T --- TDB[("PostgreSQL<br/>TripDB")]
+    M --- MDB[("MongoDB<br/>MatchDB")]
+    P --- PDB[("PostgreSQL<br/>PayDB")]
+    T & M & P <--> MQ{{"RabbitMQ"}}
 ```
 
-Mỗi service sở hữu dữ liệu của mình; Trip và Payment dùng cùng **DBMS PostgreSQL** nhưng vẫn tách thành **database/instance riêng** trong môi trường Docker để giữ nguyên nguyên tắc database-per-service.
+- **Database-per-service:** mỗi service sở hữu CSDL riêng và không đọc CSDL của service khác.
+- **Giao tiếp đồng bộ (REST):** chỉ dùng khi cần trả lời ngay, gồm client gọi qua Gateway, lấy giá nội bộ và đọc snapshot chuyến.
+- **Giao tiếp bất đồng bộ (RabbitMQ):** dùng cho các bước nghiệp vụ, gồm tìm tài xế, nhả tài xế, thanh toán và kết quả thanh toán.
 
-## 3. Luồng nghiệp vụ chính
+## 3. Luồng nghiệp vụ
 
-Luồng mục tiêu của bài:
+1. Rider đặt xe (`POST /api/trips`). Trip lấy giá do server tính rồi lưu chuyến ở trạng thái `Requested`.
+2. Rider xác nhận giá (`confirm-price`) hoặc hủy.
+3. Matching tìm tài xế gần nhất trên MongoDB và giữ chỗ nguyên tử. Trip gửi lời mời cho tài xế qua SignalR.
+4. Tài xế nhận hoặc từ chối. Khi từ chối hoặc hết giờ, hệ thống nhả tài xế, tăng `declineCount` và thử người khác; chuyến chỉ `Failed` khi `declineCount > k`. Ngưỡng `k` (`DeclineThreshold`, mặc định 2), TTL lời mời và bán kính nằm trong [config/trip/trip-matching.json](config/trip/trip-matching.json): sửa file là có hiệu lực ngay, không cần restart (xem `GET /api/trips/matching-settings`).
+5. Tài xế cập nhật `enroute` → `pickup` → `dropoff`.
+6. Dropoff chuyển chuyến sang `PaymentPending` và phát `TripDroppedOffV1` (qua Outbox, cùng transaction). **Saga thanh toán** nhận event và gửi `ProcessPaymentV1`.
+7. Payment ghi sổ cái và phát kết quả: chuyến thành `Paid` khi thành công, `Failed` khi bị từ chối. Quá hạn chờ (mặc định 10 phút) thì saga chuyển chuyến sang `Failed`; nếu tiền về muộn, saga tự gửi lệnh hoàn tiền (bù trừ).
+8. Admin có thể hoàn tiền (`refund`) cho payment đã thành công.
 
-1. Rider gửi yêu cầu đặt xe qua API Gateway.
-2. Trip Service tạo chuyến ở trạng thái `Requested`.
-3. Matching & Pricing Service tìm tài xế phù hợp và tính giá.
-4. Rider xác nhận hoặc từ chối giá.
-5. Driver nhận/từ chối chuyến; hệ thống có thể thử tài xế khác theo giới hạn `k`.
-6. Khi driver nhận chuyến, Trip Service quản lý các trạng thái đang đến, đón khách và trả khách.
-7. Sau khi trả khách, Payment Service xử lý thanh toán.
-8. Chuyến kết thúc ở trạng thái thành công hoặc một trạng thái kết thúc/lỗi phù hợp.
+Sơ đồ trạng thái và luồng message chi tiết: [báo cáo, mục 4](docs/architecture-report.md#4-flowchart-vòng-đời-một-chuyến-đi).
 
-## 4. Tech stack core
+## 4. Chạy project
 
-| Hạng mục | Công nghệ |
+### Yêu cầu
+
+- .NET 10 SDK (`global.json` ghim 10.0.300, cho phép roll-forward)
+- Docker Desktop hoặc Docker Engine có Docker Compose 2.24.4 trở lên
+- Tùy chọn: Python 3 (system test), PowerShell 7 (nghiệm thu Gateway), Node.js 22 (Newman, mobile)
+
+### Khởi động toàn bộ backend
+
+```bash
+docker compose up --build -d
+```
+
+Compose có sẵn giá trị mặc định cho môi trường dev. Muốn đổi mật khẩu hoặc khóa, copy `.env.example` thành `.env` rồi sửa; **không commit `.env`**.
+
+Lần đầu khởi động, Keycloak mất khoảng 20–40 giây để import realm. Gateway chỉ báo sẵn sàng khi đọc được Keycloak:
+
+```bash
+curl http://localhost:5100/health/ready
+```
+
+| Địa chỉ | Thành phần |
 |---|---|
-| Language | C# |
-| Runtime / Framework | .NET 10 LTS / ASP.NET Core |
-| API style | Minimal API hoặc Controllers |
-| API Gateway | Ocelot |
-| Authentication | JWT Bearer; OAuth2/OIDC có thể tích hợp sau |
-| Trip data | PostgreSQL + EF Core 10 + Npgsql |
-| Matching/Pricing data | MongoDB + MongoDB.Driver |
-| Payment data | PostgreSQL + EF Core 10 + Npgsql |
-| Container | Docker + Docker Compose |
-| Testing | xUnit v3 + Moq + Microsoft.NET.Test.Sdk |
+| http://localhost:5100 | API Gateway (mọi API nghiệp vụ dưới `/api/*`) |
+| http://localhost:8180 | Keycloak (đăng nhập, Admin Console tại `/admin`) |
+| http://localhost:15672 | RabbitMQ Management |
+| `localhost:5101` / `5102` / `5103` | Trip / Matching / Payment (gọi trực tiếp vẫn phải có JWT) |
+| `localhost:5433` / `27017` / `5434` | PostgreSQL Trip / MongoDB / PostgreSQL Payment |
 
-## 5. Quản lý dependency trong .NET
+### Tài khoản demo (realm Keycloak, chỉ dùng cho dev)
 
-Nếu quen Maven/Spring, các file tương ứng trong solution này là:
+Mật khẩu mặc định của tất cả tài khoản: `SwiftRide-demo-2026!`.
 
-- `*.csproj`: gần nhất với `pom.xml` ở cấp từng project; khai báo SDK và `PackageReference`.
-- `Directory.Packages.props`: quản lý version NuGet tập trung cho toàn solution.
-- `Directory.Build.props`: cấu hình build chung, gồm `net10.0`, nullable và implicit usings.
-- `global.json`: chọn .NET SDK 10 và cho phép roll-forward tới feature band mới hơn của .NET 10.
+| Email | Vai trò |
+|---|---|
+| rider.demo@example.com, rider.other@example.com | Rider |
+| driver.demo@example.com, driver.other@example.com | Driver |
+| admin.demo@example.com | Admin (refund) |
+
+Lấy token để thử API (client `swiftride-postman` chỉ dành cho dev/test):
+
+```bash
+curl -s -X POST http://localhost:8180/realms/swiftride/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=swiftride-postman \
+  -d username=rider.demo@example.com --data-urlencode "password=SwiftRide-demo-2026!"
+```
+
+App mobile đăng nhập bằng Authorization Code + PKCE (client `swiftride-mobile`). Chi tiết: [docs/gateway-auth.md](docs/gateway-auth.md).
+
+### Đổi tham số khi đang chạy (không restart)
+
+Sửa file trong `config/`, lưu lại; vài giây sau service tự nạp và ghi log `changed at runtime`.
+
+| Tham số | Nơi quyết định (một chỗ duy nhất) | Xem giá trị đang áp dụng | Phạm vi ảnh hưởng |
+|---|---|---|---|
+| Ngưỡng từ chối `k` | `config/trip/trip-matching.json` → `TripMatching:DeclineThreshold` | `GET /api/trips/matching-settings`; `declineCount` trong `GET /api/trips/{id}` | Lần từ chối kế tiếp, kể cả chuyến đang chạy |
+| TTL lời mời tài xế | `config/trip/trip-matching.json` → `InvitationTimeoutSeconds` | `GET /api/trips/matching-settings` | Lời mời tạo sau khi đổi |
+| Bán kính tìm tài xế | `config/trip/trip-matching.json` → `SearchRadiusKm` | `GET /api/trips/matching-settings` | Lượt tìm tài xế kế tiếp |
+| Đơn giá km/phút, VAT, phí phụ | `config/matching/matching-settings.json` → `Pricing:*` | `GET /api/matching/settings`; chi tiết trong `POST /api/matching/quote` | Báo giá và chuyến **mới** (giá chuyến cũ đã chốt lúc tạo) |
+| TTL vị trí tài xế | `config/matching/matching-settings.json` → `DriverAvailability:LocationTtlSeconds` | `GET /api/matching/settings` | Lượt tìm tài xế kế tiếp |
+| Surge | MongoDB collection `surge_rules` (`StartHour`, `EndHour`, `Multiplier`, giờ UTC+7) | `GET /api/matching/settings` → `surgeRules` | Báo giá kế tiếp |
+| Hạn chờ thanh toán (Saga) | Biến `TRIP_PAYMENT_TIMEOUT_SECONDS` (cần recreate container trip-service) | `GET /api/trips/{id}/payment-saga` → `deadlineUtc` | Saga tạo sau khi đổi |
+
+Ví dụ thêm surge ×2 cho 17–19h:
+
+```bash
+docker compose exec -T matching-mongodb mongosh --quiet swiftride_matching --eval 'db.surge_rules.insertOne({_id:"demo",StartHour:17,EndHour:19,Multiplier:NumberDecimal("2.0")})'
+```
+
+### Dừng
+
+```bash
+docker compose down        # giữ dữ liệu
+```
+
+Không dùng `down -v` nếu muốn giữ dữ liệu.
+
+## 5. Kiểm thử
+
+| Bộ test | Lệnh | Phạm vi |
+|---|---|---|
+| Unit / HTTP cục bộ | `dotnet test --solution SwiftRide.sln -- --filter-not-trait Category=Integration` | Domain, application, bảo mật endpoint, Gateway thật + SignalR |
+| Postman / Newman | Xem [postman/README.md](postman/README.md) | 73 request: đăng nhập Keycloak, token giả, vòng đời chuyến, reject → đổi tài xế, thanh toán, refund |
+| System / recovery | `python tests/System/messaging.py --dotnet dotnet` | 25 kịch bản trên stack Docker riêng: message trùng, kill service, restart broker/CSDL, replay lỗi |
+| Nghiệm thu Gateway + Keycloak | `pwsh -NoProfile -File tests/Gateway.Security/task1.ps1` | Token qua restart, readiness, logout, phân quyền, cô lập SignalR |
+
+CI (GitHub Actions) chạy build, unit test, system suite và nghiệm thu Gateway khi push lên `main` và trên mỗi pull request.
 
 ## 6. Cấu trúc thư mục
-
-Cấu trúc bám theo mục 8.1 của đề, có điều chỉnh database theo quyết định của nhóm:
 
 ```text
 SwiftRide/
 ├── src/
-│   ├── ApiGateway/
-│   │   ├── ApiGateway.csproj
-│   │   ├── Program.cs
-│   │   └── Dockerfile
-│   ├── TripService/
-│   │   ├── Domain/
-│   │   ├── Application/
-│   │   ├── Infrastructure/
-│   │   ├── Api/
-│   │   ├── TripService.csproj
-│   │   ├── Program.cs
-│   │   └── Dockerfile
-│   ├── MatchingService/
-│   │   ├── Domain/
-│   │   ├── Application/
-│   │   ├── Infrastructure/
-│   │   ├── Api/
-│   │   ├── MatchingService.csproj
-│   │   ├── Program.cs
-│   │   └── Dockerfile
-│   └── PaymentService/
-│       ├── Domain/
-│       ├── Application/
-│       ├── Infrastructure/
-│       ├── Api/
-│       ├── PaymentService.csproj
-│       ├── Program.cs
-│       └── Dockerfile
-├── tests/
-│   └── TripService.Tests/
-├── Directory.Build.props
-├── Directory.Packages.props
-├── global.json
+│   ├── ApiGateway/                # YARP + xác thực JWT (Keycloak)
+│   ├── TripService/               # Domain / Application / Infrastructure / Api / Migrations
+│   ├── MatchingService/           # Domain / Application / Infrastructure / Api
+│   ├── PaymentService/            # Domain / Application / Infrastructure / Api
+│   ├── SwiftRide.Contracts/       # Message contracts (…V1)
+│   ├── SwiftRide.Messaging/       # Cấu hình MassTransit dùng chung
+│   ├── SwiftRide.Messaging.Setup/ # Khởi tạo topology RabbitMQ
+│   └── Shared/                    # ServiceSecurity: xác thực token Keycloak + token nội bộ
+├── keycloak/                      # Realm swiftride (role, client, user demo)
+├── mobile/                        # App Rider / Driver (React Native + Expo)
+├── tests/                         # xUnit, system suite, nghiệm thu Gateway
+├── postman/                       # Collection chấm API + environment
+├── docs/                          # Báo cáo kiến trúc và tài liệu vận hành
 ├── docker-compose.yml
+├── Directory.Packages.props       # Quản lý version NuGet tập trung
 └── SwiftRide.sln
 ```
 
-## 7. SOLID và design pattern định hướng
+## 7. SOLID và design pattern (tóm tắt)
 
-Core nên triển khai pattern vì có nhu cầu nghiệp vụ, không phải để đủ số lượng:
+| Pattern / nguyên tắc | Ở đâu |
+|---|---|
+| **State** | `src/TripService/Domain/States` (vòng đời chuyến) |
+| **Strategy** + Open/Closed | `src/MatchingService/Domain/Strategies` (Standard / Surge / Promo) |
+| **Repository**, Interface Segregation | `ITripReader` / `ITripWriter`, `IDriverRepository`, `IPaymentRepository` |
+| **Dependency Inversion** | Đăng ký DI trong `Program.cs` của từng service |
+| **Transactional Outbox / Inbox**, Idempotent Consumer | MassTransit EF Outbox ở Trip và Payment |
+| **Factory** | `PaymentMethodFactory` tạo phương thức Wallet / Card trong Payment |
+| **Saga (orchestration)** + bù trừ | `TripPaymentStateMachine`: thanh toán sau trả khách, timeout, tự hoàn tiền khi tiền về muộn |
+| **API Gateway** | `src/ApiGateway` |
 
-- **State**: vòng đời Trip và các transition hợp lệ.
-- **Strategy**: Standard / Surge / Promotion pricing.
-- **Repository**: trừu tượng hóa persistence cho Trip và Payment khi triển khai domain/application layer.
-- **Dependency Injection / DIP**: application/domain phụ thuộc abstraction thay vì hạ tầng cụ thể.
-- **Factory**: chỉ cần nếu có nhiều kiểu payment method cần khởi tạo khác nhau.
+Giải thích và ví dụ code: [báo cáo, mục 6–7](docs/architecture-report.md#6-áp-dụng-nguyên-tắc-solid).
 
-Pub/Sub dùng RabbitMQ/MassTransit. Trip và Payment dùng EF inbox/outbox; Matching giữ reservation trong MongoDB. Chưa dùng Saga framework. Runbook hiện tại: [messaging.md](docs/messaging.md).
+## 8. Tài liệu
 
-## 8. Chạy project
+| Tài liệu | Nội dung |
+|---|---|
+| [docs/architecture-report.md](docs/architecture-report.md) | Báo cáo kiến trúc theo đề |
+| [docs/gateway-auth.md](docs/gateway-auth.md) | Keycloak, xác thực và phân quyền |
+| [docs/gateway-docker-test.md](docs/gateway-docker-test.md) | Chạy và thử Gateway trên Docker |
+| [docs/messaging.md](docs/messaging.md) | Runbook RabbitMQ: topology, xử lý queue lỗi, replay |
+| [docs/mobile-api-contract.md](docs/mobile-api-contract.md) | Hợp đồng API/SignalR cho mobile |
+| [postman/README.md](postman/README.md) | Chạy bộ chấm API bằng Postman/Newman |
+| [mobile/README.md](mobile/README.md) | Chạy app trên điện thoại, build Android |
+| `docs/task*-results.md` | Kết quả kiểm thử theo từng giai đoạn |
 
-### Yêu cầu
+## 9. Hạn chế hiện tại
 
-- .NET 10 SDK
-- Docker Desktop / Docker Engine có Docker Compose
+- Payment là ledger mô phỏng, chưa tích hợp cổng thanh toán thật.
+- Chưa có OpenTelemetry; hệ thống hiện chỉ có log có cấu trúc và health check.
+- App mobile còn chạy ở chế độ demo, chưa nối API thật và Keycloak.
+- Phí phụ (toll) đang bằng 0 và loại xe chưa ảnh hưởng tới giá.
 
-### Restore
-
-```bash
-dotnet restore SwiftRide.sln
-```
-
-### Chạy toàn backend bằng Docker
-
-```bash
-cp .env.example .env
-docker compose up --build
-```
-
-Các endpoint health mặc định:
-
-- API Gateway: `http://localhost:5100/health`
-- Trip Service: `http://localhost:5101/health`
-- Matching Service: `http://localhost:5102/health`
-- Payment Service: `http://localhost:5103/health`
-
-Database local:
-
-- Trip PostgreSQL: `localhost:5433`
-- Matching MongoDB: `localhost:27017`
-- Payment PostgreSQL: `localhost:5434`
-
-### Chạy test
-
-```bash
-dotnet test --solution SwiftRide.sln -- --filter-not-trait Category=Integration
-python tests/System/messaging.py --dotnet dotnet
-```
-
-## 9. Ghi chú scaffold
-
-Repository đã có luồng Trip/Matching/Pricing/Payment, reservation và inbox/outbox. Payment hiện mô phỏng ledger, chưa tích hợp PSP/ngân hàng thật. Xem [runbook](docs/messaging.md) và [bằng chứng kiểm thử](docs/task5-results.md).
-
-## Authentication tại Gateway
-
-API Gateway đã tích hợp Auth trực tiếp với PostgreSQL, JWT, refresh token rotation/replay detection và Ocelot identity headers. Toàn bộ solution dùng .NET 10; Gateway dùng EF Core 10/Npgsql. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose có giá trị mặc định để test local; có thể override AUTH_DB_PASSWORD và JWT_SECRET_KEY trong .env. Xem docs/gateway-docker-test.md.
+Hướng phát triển: [báo cáo, mục 11](docs/architecture-report.md#11-hạn-chế-và-hướng-phát-triển).
