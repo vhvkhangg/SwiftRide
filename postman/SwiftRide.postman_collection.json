@@ -54,6 +54,7 @@
                   "pm.collectionVariables.unset('rejectTripId');",
                   "pm.collectionVariables.unset('rejectInvitationDeadline');",
                   "pm.collectionVariables.unset('reassignInvitationDeadline');",
+                  "pm.collectionVariables.unset('cancelUpdatedAt');",
                   "pm.collectionVariables.set('runId', pm.variables.replaceIn('{{$guid}}'));"
                 ]
               }
@@ -2864,7 +2865,117 @@
                   "const expected = [200];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { pm.expect([8,'Cancelled']).to.include(pm.response.json().status); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect([8,'Cancelled']).to.include(data.status); pm.collectionVariables.set('cancelUpdatedAt', data.updatedAt); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "64 Cancelled Trip has no payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/payments/trip/{{cancelTripId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [404];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "65 Confirm price after cancel rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{cancelTripId}}/confirm-price",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [409];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.responseTime).to.be.at.least(0); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "66 Cancelled Trip unchanged after invalid action",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/{{cancelTripId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [200];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect([8,'Cancelled']).to.include(data.status); pm.expect(data.updatedAt).to.eql(pm.collectionVariables.get('cancelUpdatedAt')); pm.expect(data.driverId == null).to.eql(true); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }
@@ -2876,7 +2987,7 @@
       "name": "09 - Refresh and logout",
       "item": [
         {
-          "name": "64 Rotate Rider refresh token",
+          "name": "67 Rotate Rider refresh token",
           "request": {
             "method": "POST",
             "header": [
@@ -2926,7 +3037,7 @@
           ]
         },
         {
-          "name": "65 Refreshed session works",
+          "name": "68 Refreshed session works",
           "request": {
             "method": "GET",
             "header": [],
@@ -2958,7 +3069,7 @@
           ]
         },
         {
-          "name": "66 Logout ends Keycloak session",
+          "name": "69 Logout ends Keycloak session",
           "request": {
             "method": "POST",
             "header": [
@@ -3003,7 +3114,7 @@
           ]
         },
         {
-          "name": "67 Revoked refresh rejected",
+          "name": "70 Revoked refresh rejected",
           "request": {
             "method": "POST",
             "header": [
@@ -3058,7 +3169,7 @@
       "name": "10 - Cleanup",
       "item": [
         {
-          "name": "68 Driver offline",
+          "name": "71 Driver offline",
           "request": {
             "method": "POST",
             "header": [
@@ -3104,7 +3215,7 @@
           ]
         },
         {
-          "name": "69 Logout Driver",
+          "name": "72 Logout Driver",
           "request": {
             "method": "POST",
             "header": [
@@ -3149,7 +3260,7 @@
           ]
         },
         {
-          "name": "70 Logout other Driver",
+          "name": "73 Logout other Driver",
           "request": {
             "method": "POST",
             "header": [
@@ -3194,7 +3305,7 @@
           ]
         },
         {
-          "name": "71 Logout other Rider",
+          "name": "74 Logout other Rider",
           "request": {
             "method": "POST",
             "header": [
@@ -3239,7 +3350,7 @@
           ]
         },
         {
-          "name": "72 Logout Admin",
+          "name": "75 Logout Admin",
           "request": {
             "method": "POST",
             "header": [

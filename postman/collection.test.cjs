@@ -40,7 +40,7 @@ function execute(prefix, body, { code = 200, values = {}, now = 1000, event = 't
     return { state, failures, next, name: item.name };
 }
 test('Collection has unique names, Gateway or Keycloak URLs, no persisted tokens and valid script syntax', () => {
-    assert.equal(requests.length, 73);
+    assert.equal(requests.length, 76);
     assert.equal(new Set(requests.map(item => item.name)).size, requests.length);
     assert.deepEqual(collection.variable, []);
     for (const item of requests) {
@@ -179,6 +179,15 @@ test('Identity comes from Keycloak userinfo; Rider token must not carry Driver/A
     assert.equal(execute('11 ', { sub: 'driver-sub', role: ['Driver'] }).state.get('driverId'), 'driver-sub');
 });
 test('Revoked Keycloak refresh token must fail with invalid_grant', () => {
-    assert.deepEqual(execute('67 ', { error: 'invalid_grant' }, { code: 400 }).failures, []);
-    assert.equal(execute('67 ', { access_token: 'x' }, { code: 200 }).next, null);
+    assert.deepEqual(execute('70 ', { error: 'invalid_grant' }, { code: 400 }).failures, []);
+    assert.equal(execute('70 ', { access_token: 'x' }, { code: 200 }).next, null);
+});
+test('Cancelled Trip: invalid action must leave status and updatedAt unchanged', () => {
+    const values = { cancelUpdatedAt: '2026-11-16T10:00:00Z' };
+    assert.deepEqual(execute('63 ', { status: 'Cancelled', updatedAt: '2026-11-16T10:00:00Z' }).state.get('cancelUpdatedAt'), '2026-11-16T10:00:00Z');
+    assert.deepEqual(execute('66 ', { status: 8, updatedAt: '2026-11-16T10:00:00Z', driverId: null }, { values }).failures, []);
+    const changed = execute('66 ', { status: 8, updatedAt: '2026-11-16T10:05:00Z', driverId: null }, { values });
+    assert.equal(changed.next, null);
+    assert.equal(changed.failures.length, 1);
+    assert.equal(execute('64 ', {}, { code: 200 }).next, null);
 });

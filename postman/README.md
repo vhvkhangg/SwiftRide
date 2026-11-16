@@ -2,9 +2,9 @@
 
 ## Pham vi
 
-Collection co 73 request: readiness, Keycloak discovery/trang dang ky, dang nhap qua Keycloak (Rider, Driver, Admin), role isolation, token gia/het han, quote, GPS, Trip idempotency, invitation/accept, enroute/pickup/dropoff, cho Paid, doc Payment, Admin refund, Driver reject doi ung vien, cancel, refresh/logout. Token lay tu Keycloak (`{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/*`, client dev-only `swiftride-postman`, password grant); API nghiep vu chi goi qua API Gateway. Khong ep trang thai noi bo hoac tao Payment lan hai.
+Collection co 76 request: readiness, Keycloak discovery/trang dang ky, dang nhap qua Keycloak (Rider, Driver, Admin), role isolation, token gia/het han, quote, GPS, Trip idempotency, invitation/accept, enroute/pickup/dropoff, cho Paid, doc Payment, Admin refund, Driver reject doi ung vien, cancel, refresh/logout. Token lay tu Keycloak (`{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/*`, client dev-only `swiftride-postman`, password grant); API nghiep vu chi goi qua API Gateway. Khong ep trang thai noi bo hoac tao Payment lan hai.
 
-Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, tao 3 Trip va 1 Payment (Payment bi refund o cuoi luong); doi online/offline cua 2 Driver demo. Khong xoa du lieu/volume. Neu run dung giua chung, xu ly Trip con dang chay va dat Driver offline bang request 68 va 60 (hoac 22). Khong export collection sau run kem token that.
+Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, tao 3 Trip va 1 Payment (Payment bi refund o cuoi luong); doi online/offline cua 2 Driver demo. Khong xoa du lieu/volume. Neu run dung giua chung, xu ly Trip con dang chay va dat Driver offline bang request 71 va 60 (hoac 22). Khong export collection sau run kem token that.
 
 ## Chuan bi backend
 
@@ -17,7 +17,7 @@ Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, t
 
 1. Import `SwiftRide.postman_collection.json` va `SwiftRide.local.postman_environment.json`.
 2. Chon environment **SwiftRide Local**. Sua `baseUrl` neu can, khong co dau `/` cuoi; mac dinh `http://localhost:5100`.
-3. Mo Collection Runner, chon **toan bo collection**, **1 iteration**, chay tu 00 den 72, dat **Delay 500 ms**. Khong chay song song.
+3. Mo Collection Runner, chon **toan bo collection**, **1 iteration**, chay tu 00 den 75, dat **Delay 500 ms**. Khong chay song song.
 4. Xem ket qua assertions. Token, Trip ID, Payment ID duoc lay tu response va luu trong collection variables; environment chi giu config.
 
 Nut Send chi gui mot request. `setNextRequest` chi dieu khien flow trong Runner/Newman. Request 31, 52, 56 lap cho invitation va request 40 lap cho Paid, toi da `pollTimeoutSeconds` (mac dinh 45, cho phep 5..120). Sau loi HTTP hoac assertion, Runner dung; khong coi request 202 la da thanh toan. Keycloak khoa tam tai khoan sau 10 lan sai mat khau lien tiep (brute-force protection), tu mo sau toi da 15 phut.
@@ -52,7 +52,9 @@ node --test postman/collection.test.cjs
 - Rider khac bi chan doc Trip/Payment, Rider khong duoc refund hay force Paid.
 - Admin refund Payment tra 200 `Refunded`; refund lan hai bi 409; Rider doc lai thay `Refunded`.
 - Trip thu hai: Driver chinh nhan loi moi roi reject (202); Driver nay khong accept lai duoc (403); loi moi chuyen sang Driver phu, Trip van `PriceConfirmed` chua co Driver; Rider cancel va Driver phu ve offline.
-- Tao Trip rieng de cancel; cuoi cung refresh token qua Keycloak, logout (204), refresh cu bi 400 `invalid_grant`, dat Driver offline. Logout khong thu hoi access token da cap ngay lap tuc.
+- Tao Trip rieng de cancel.
+- Chuyen da huy: khong co Payment (`GET /api/payments/trip/{id}` 404); thao tac khong con hop le (confirm-price) bi 409; doc lai van `Cancelled`, `updatedAt` khong doi.
+- Cuoi cung refresh token qua Keycloak, logout (204), refresh cu bi 400 `invalid_grant`, dat Driver offline. Logout khong thu hoi access token da cap ngay lap tuc.
 
 ## Gioi han
 
