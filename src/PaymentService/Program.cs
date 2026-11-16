@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using SwiftRide.PaymentService.Infrastructure.Persistence;
 using SwiftRide.PaymentService.Domain.Repositories;
 using SwiftRide.PaymentService.Infrastructure.Repositories;
+using SwiftRide.PaymentService.Application.PaymentMethods;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Api.Endpoints;
 using SwiftRide.PaymentService.Application.Integrations;
@@ -61,9 +62,9 @@ builder.Services.AddScoped<
     IPaymentApplicationService,
     PaymentApplicationService>();
 
-builder.Services.AddScoped<
-    IPaymentDecisionService,
-    ApprovePaymentDecisionService>();
+// Factory pattern: tạo IPaymentMethod (Wallet/Card) theo PaymentMethod của lệnh thanh toán.
+builder.Services.AddSingleton<IPaymentMethodFactory, PaymentMethodFactory>();
+builder.Services.AddScoped<IPaymentDecisionService, PaymentMethodDecisionService>();
 
 builder.Services.AddServiceSecurity(builder.Configuration);
 

@@ -1,5 +1,6 @@
 using SwiftRide.Contracts.Payments;
 using SwiftRide.PaymentService.Application.DTOs;
+using SwiftRide.PaymentService.Domain.Enums;
 
 namespace SwiftRide.PaymentService.Application.Messaging;
 
@@ -80,7 +81,18 @@ public static class ProcessPaymentV1Mapper
             message.Amount,
             message.IdempotencyKey,
             message.PayerAccount,
-            message.PayeeAccount);
+            message.PayeeAccount,
+            ParseMethod(message.PaymentMethod));
+    }
+
+    private static PaymentMethodType ParseMethod(string? method)
+    {
+        // Missing value means the default wallet; unknown values are invalid data (no retry).
+        if (string.IsNullOrWhiteSpace(method)) return PaymentMethodType.Wallet;
+        if (Enum.TryParse<PaymentMethodType>(method, ignoreCase: true, out var parsed) &&
+            Enum.IsDefined(parsed) && !int.TryParse(method, out _))
+            return parsed;
+        throw new ArgumentException("PaymentMethod không được hỗ trợ.");
     }
 
     private static void ValidateText(

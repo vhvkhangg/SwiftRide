@@ -452,9 +452,29 @@ Lợi ích thấy được ngay trong kiểm thử: `TripApplicationServiceTests
 | **Transactional Outbox / Inbox** | Architectural | Ghi dữ liệu và message trong cùng transaction; chống xử lý trùng | MassTransit EF Outbox (Trip, Payment), migration `AddTripOutbox`, `AddPaymentConsumerOutbox` |
 | **Idempotent Consumer** | Integration | Message trùng không tạo payment hay ledger thứ hai | `PaymentApplicationService`, unique index idempotency key |
 | **Dependency Injection** | Creational | Gắn cài đặt cụ thể vào abstraction | `Program.cs` của mỗi service |
+| **Factory** | Creational | Tạo đối tượng `PaymentMethod` (Wallet/Card) theo trường `PaymentMethod` của lệnh thanh toán | `src/PaymentService/Application/PaymentMethods/PaymentMethods.cs` (`PaymentMethodFactory`) |
 | **Factory Method** | Creational | `Trip.Create(...)`, `Payment.Create(...)`, `LedgerEntry.Create(...)` bảo đảm thực thể sinh ra luôn hợp lệ | Domain entities |
 
-**Ghi chú về Factory:** đề minh họa Factory bằng việc tạo `PaymentMethod` (Card/Wallet). SwiftRide hiện chỉ có một phương thức thanh toán (ví mô phỏng), nên nhóm dùng **static factory method** trên entity thay vì một `PaymentMethodFactory` không có nhu cầu thực. Khi có nhiều phương thức thanh toán, factory sẽ được thêm vào sau `IPaymentDecisionService`.
+**Factory cho PaymentMethod** (đúng ví dụ của đề). Lệnh `ProcessPaymentV1` mang trường `PaymentMethod` (`"Wallet"` hoặc `"Card"`; thiếu trường thì mặc định Wallet, nên message cũ vẫn tương thích). `PaymentMethodDecisionService` nhờ factory tạo đúng đối tượng rồi giao quyết định duyệt/từ chối cho nó; phần ghi sổ cái không đổi:
+
+```csharp
+// src/PaymentService/Application/PaymentMethods/PaymentMethods.cs
+public sealed class PaymentMethodFactory : IPaymentMethodFactory
+{
+    public IPaymentMethod Create(PaymentMethodType type) => type switch
+    {
+        PaymentMethodType.Wallet => new WalletPaymentMethod(),
+        PaymentMethodType.Card => new CardPaymentMethod(),
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Phương thức thanh toán không được hỗ trợ.")
+    };
+}
+
+// src/PaymentService/Application/Services/PaymentMethodDecisionService.cs
+public Task<PaymentDecision> DecideAsync(TripSnapshot trip, CreatePaymentRequest request, CancellationToken ct) =>
+    methods.Create(request.PaymentMethod).AuthorizeAsync(trip, request, ct);
+```
+
+Cả hai phương thức đều là mô phỏng: Wallet luôn duyệt; Card mô phỏng cổng thẻ với hạn mức 5.000.000 VND/giao dịch (vượt thì `PAYMENT_DECLINED`) và không lưu số thẻ. Thêm phương thức mới (ví dụ QR) chỉ cần một lớp `IPaymentMethod` và một nhánh trong factory (OCP). Hiện Trip luôn gửi `Wallet` vì app chưa có màn hình chọn phương thức.
 
 ---
 
@@ -587,7 +607,6 @@ Saga không thay thế transaction nội bộ hay Outbox; nó được xây **tr
 |---|---|---|
 | SQL Server cho Trip | PostgreSQL | Đề cho phép cùng loại CSDL nếu tách database; giảm chi phí vận hành |
 | `POST /payments` public | Không mở | Thanh toán chỉ khởi tạo từ dropoff; client không tự tạo/lặp thanh toán được |
-| Factory `PaymentMethod` | Static factory method trên entity | Chỉ có một phương thức thanh toán mô phỏng |
 | OpenTelemetry | Log có cấu trúc + health check | Phần mở rộng, chưa làm |
 
 ---
@@ -612,7 +631,7 @@ Hướng dẫn chạy: [README.md](../README.md), [postman/README.md](../postman
 | Hạn chế hiện tại | Hướng phát triển |
 |---|---|
 | Chưa có OpenTelemetry (trace/metric phân tán) | Thêm OpenTelemetry SDK cho ASP.NET Core, HttpClient, MassTransit; xuất ra Jaeger/Prometheus; theo dõi tỉ lệ đặt xe thành công, thời gian matching, tỉ lệ thanh toán lỗi, độ dài hàng đợi |
-| Thanh toán là ledger mô phỏng | Tích hợp cổng thanh toán (chỉ lưu token do cổng cấp), thêm `PaymentMethodFactory` khi có nhiều phương thức |
+| Thanh toán là ledger mô phỏng | Tích hợp cổng thanh toán (chỉ lưu token do cổng cấp), thay `CardPaymentMethod` mô phỏng bằng adapter tới cổng thật; cho rider chọn phương thức trong app |
 | Phí phụ (toll) = 0, `RideType` chưa ảnh hưởng giá | Lấy dữ liệu trạm thu phí, thêm hệ số theo loại xe (thêm Strategy mới, không sửa lớp cũ) |
 | App mobile còn ở chế độ demo, chưa nối API và Keycloak | Dùng `expo-auth-session` với client `swiftride-mobile` (PKCE), nối REST và SignalR |
 | Token nội bộ giữa service dùng khóa chung HS256 | Chuyển sang Keycloak client credentials (mỗi service một confidential client) |

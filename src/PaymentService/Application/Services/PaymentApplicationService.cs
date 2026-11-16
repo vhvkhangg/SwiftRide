@@ -1,3 +1,4 @@
+using SwiftRide.PaymentService.Application.PaymentMethods;
 using SwiftRide.PaymentService.Application.DTOs;
 using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Domain.Entities;
@@ -13,7 +14,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     private readonly IPaymentRepository _payments;
     private readonly ITripServiceClient _trips;
     private readonly IPaymentDecisionService _decision;
-    public PaymentApplicationService(IPaymentRepository payments, ITripServiceClient trips) : this(payments, trips, new ApprovePaymentDecisionService())
+    public PaymentApplicationService(IPaymentRepository payments, ITripServiceClient trips) : this(payments, trips, new PaymentMethodDecisionService(new PaymentMethodFactory()))
     {
     }
 

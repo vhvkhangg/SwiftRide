@@ -148,6 +148,7 @@ SwiftRide/
 | **Repository**, Interface Segregation | `ITripReader` / `ITripWriter`, `IDriverRepository`, `IPaymentRepository` |
 | **Dependency Inversion** | Đăng ký DI trong `Program.cs` của từng service |
 | **Transactional Outbox / Inbox**, Idempotent Consumer | MassTransit EF Outbox ở Trip và Payment |
+| **Factory** | `PaymentMethodFactory` tạo phương thức Wallet / Card trong Payment |
 | **Saga (choreography)** + bù trừ | Nhả tài xế, tìm tài xế khác, payment failed, refund |
 | **API Gateway** | `src/ApiGateway` |
 

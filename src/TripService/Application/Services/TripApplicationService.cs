@@ -355,6 +355,8 @@ public sealed class TripApplicationService : ITripApplicationService
                 IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
                 PayerAccount = $"rider-{trip.RiderId:D}",
                 PayeeAccount = $"driver-{trip.DriverId.Value:D}",
+                // Rider chưa chọn được phương thức trong app; mặc định ví SwiftRide.
+                PaymentMethod = "Wallet",
                 OccurredAtUtc = DateTimeOffset.UtcNow
             };
 
