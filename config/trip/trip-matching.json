@@ -1,0 +1,7 @@
+{
+  "TripMatching": {
+    "DeclineThreshold": 2,
+    "InvitationTimeoutSeconds": 120,
+    "SearchRadiusKm": 5
+  }
+}

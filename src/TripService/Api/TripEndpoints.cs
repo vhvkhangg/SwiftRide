@@ -54,6 +54,18 @@ public static class TripEndpoints
         // API Lấy thông tin chuyến đi
         group.MapGet("/{id:guid}", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
             Results.Ok(await service.GetByIdAsync(id, ct)));
+        // Tham số matching đang áp dụng (k, TTL lời mời, bán kính) để đối chiếu khi demo đổi ngưỡng.
+        group.MapGet("/matching-settings", (Microsoft.Extensions.Options.IOptionsMonitor<TripMatchingOptions> options) =>
+        {
+            var o = options.CurrentValue;
+            return Results.Ok(new
+            {
+                declineThreshold = o.DeclineThreshold,
+                rule = "Trip Failed when declineCount > declineThreshold",
+                o.InvitationTimeoutSeconds,
+                o.SearchRadiusKm
+            });
+        });
         // Tiến trình Saga thanh toán của chuyến (để quan sát/demo); quyền giống xem chi tiết chuyến.
         group.MapGet("/{id:guid}/payment-saga", async (Guid id, TripDbContext db, CancellationToken ct) =>
         {

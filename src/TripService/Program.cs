@@ -11,6 +11,11 @@ using SwiftRide.TripService.Application.Consumers;
 using SwiftRide.TripService.Application.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+// Tham số matching (ngưỡng từ chối k, TTL lời mời, bán kính) đổi được khi đang chạy: file tự nạp lại.
+// Biến môi trường thêm lại sau để vẫn ghi đè được file (dùng cho bộ test).
+builder.Configuration
+    .AddJsonFile("config/trip-matching.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
 builder.Services.AddDbContext<TripDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("TripDb")));
@@ -82,6 +87,12 @@ builder.Services.AddScoped<SwiftRide.TripService.Application.Interfaces.ITripApp
 builder.Services.AddHostedService<SwiftRide.TripService.Application.Services.DriverInvitationTimeoutWorker>();
 
 var app = builder.Build();
+var matchingLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("TripMatching");
+var matchingOptions = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<TripMatchingOptions>>();
+matchingOptions.CurrentValue.Validate();
+matchingOptions.OnChange((o, _) => matchingLog.LogInformation(
+    "TripMatching changed at runtime: DeclineThreshold(k)={K}, InvitationTimeoutSeconds={Ttl}, SearchRadiusKm={Radius}",
+    o.DeclineThreshold, o.InvitationTimeoutSeconds, o.SearchRadiusKm));
 
 // Readiness kiểm tra kết nối RabbitMQ; giữ nguyên /health hiện có.
 app.MapHealthChecks("/health/ready").AllowAnonymous();

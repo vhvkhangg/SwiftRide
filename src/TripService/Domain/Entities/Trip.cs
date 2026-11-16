@@ -17,6 +17,8 @@ public sealed class Trip
     public decimal? FareEstimate { get; private set; }
     public TripStatus Status { get; private set; }
     public int MatchingAttempt { get; private set; }
+    /// <summary>Số lần tài xế từ chối hoặc để lời mời hết giờ (so với ngưỡng k).</summary>
+    public int DeclineCount { get; private set; }
     public string? PaymentFailureReason { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime? UpdatedAt { get; private set; }
@@ -88,6 +90,15 @@ public sealed class Trip
         _state = _state.ConfirmPrice();
         Status = _state.Status;
         UpdatedAt = DateTime.UtcNow;
+    }
+
+    public int RecordDecline()
+    {
+        if (Status != TripStatus.PriceConfirmed)
+            throw new InvalidOperationException("Trip không còn chờ tài xế phản hồi.");
+        DeclineCount++;
+        UpdatedAt = DateTime.UtcNow;
+        return DeclineCount;
     }
 
     public int BeginMatchingAttempt(int maxAttempts)

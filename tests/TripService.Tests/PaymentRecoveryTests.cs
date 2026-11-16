@@ -56,7 +56,7 @@ public sealed class PaymentRecoveryTests
         var writer = new Mock<ITripWriter>();
         var service = new TripApplicationService(writer.Object, reader.Object,
             Mock.Of<ITripWorkflowRepository>(), Mock.Of<ITripUnitOfWork>(), Mock.Of<ITripNotifier>(),
-            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), TestOptions.Monitor(new TripMatchingOptions()));
         var command = new ProcessPaymentV1
         {
             TripId = trip.Id,
@@ -115,7 +115,7 @@ public sealed class PaymentRecoveryTests
         var writer = new Mock<ITripWriter>();
         var service = new TripApplicationService(writer.Object, reader.Object,
             Mock.Of<ITripWorkflowRepository>(), Mock.Of<ITripUnitOfWork>(), Mock.Of<ITripNotifier>(),
-            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), TestOptions.Monitor(new TripMatchingOptions()));
 
         var command = new ProcessPaymentV1
         {
@@ -152,7 +152,7 @@ public sealed class PaymentRecoveryTests
         var writer = new Mock<ITripWriter>();
         var service = new TripApplicationService(writer.Object, reader.Object,
             Mock.Of<ITripWorkflowRepository>(), Mock.Of<ITripUnitOfWork>(), Mock.Of<ITripNotifier>(),
-            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), Options.Create(new TripMatchingOptions()));
+            Mock.Of<IMatchingPricingClient>(), Mock.Of<ITripMessageBus>(), TestOptions.Monitor(new TripMatchingOptions()));
         var tripId = Guid.NewGuid();
         var result = new PaymentSucceededV1
         {

@@ -2611,7 +2611,7 @@
                   "const expected = [200];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect([1,'PriceConfirmed']).to.include(data.status); pm.expect(data.driverId == null).to.eql(true); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect([1,'PriceConfirmed']).to.include(data.status); pm.expect(data.driverId == null).to.eql(true); pm.expect(data.declineCount).to.eql(1); pm.expect(data.declineCount <= data.declineThreshold).to.eql(true); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }

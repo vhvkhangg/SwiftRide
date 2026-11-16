@@ -14,7 +14,7 @@ services:
     ports: !override ["127.0.0.1::8080"]
     environment:
       TripMatching__InvitationTimeoutSeconds: 30
-      TripMatching__MaxAttempts: 3
+      TripMatching__DeclineThreshold: 2
   matching-service:
     ports: !override ["127.0.0.1::8080"]
   payment-service:

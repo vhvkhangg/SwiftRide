@@ -61,7 +61,7 @@ Giá trị cốt lõi là **độ tin cậy**. Hệ thống phải:
 | 2. Tạo chuyến | Trip gọi nội bộ `POST /internal/quote` để lấy giá do server tính, lưu chuyến ở trạng thái `Requested`. Có idempotency key chống tạo trùng | Trip, Matching |
 | 3. Tìm tài xế và báo giá | Giá trả ngay khi tạo chuyến. Sau khi rider xác nhận, Trip gửi command `FindDriverForTripV1`; Matching tìm tài xế gần nhất bằng `$nearSphere` trên MongoDB và **giữ chỗ** tài xế một cách nguyên tử | Trip, Matching |
 | 4. Rider xác nhận giá | `POST /api/trips/{id}/confirm-price` chuyển chuyến sang `PriceConfirmed`. Rider từ chối thì gọi `cancel` và chuyến thành `Cancelled` | Trip |
-| 5. Đề xuất cho tài xế | Matching phát `DriverFoundForTripV1`; Trip tạo `DriverInvitation` và đẩy sự kiện SignalR `driverInvitation`. Khi tài xế từ chối (`driver-reject`) hoặc hết giờ: nhả tài xế, tăng lượt thử và tìm người khác, loại những tài xế đã mời. Vượt `TripMatching:MaxAttempts` (k = 3) thì chuyến thành `Failed` | Trip, Matching |
+| 5. Đề xuất cho tài xế | Matching phát `DriverFoundForTripV1`; Trip tạo `DriverInvitation` và đẩy sự kiện SignalR `driverInvitation`. Khi tài xế từ chối (`driver-reject`) hoặc lời mời hết giờ: nhả tài xế, tăng `DeclineCount`, tìm người khác (loại những tài xế đã mời). Chỉ khi `DeclineCount > k` (`TripMatching:DeclineThreshold`, mặc định 2) chuyến mới thành `Failed` | Trip, Matching |
 | 6. Thực hiện chuyến | `driver-accept` → `DriverAccepted`; `enroute` → `EnRoute`; `pickup` → `PickedUp`; `dropoff` → `DroppedOff`. Mỗi lần đổi trạng thái đều đẩy sự kiện `tripChanged` | Trip |
 | 7. Thanh toán | Ngay khi dropoff, **trong cùng một transaction**: chuyến chuyển sang `PaymentPending` và command `ProcessPaymentV1` được ghi vào Outbox. Payment ghi sổ cái rồi phát `PaymentSucceededV1` hoặc `PaymentFailedV1` | Trip, Payment |
 | 8. Kết thúc | Trip nhận kết quả: `Paid` (thành công) hoặc `Failed` (bị từ chối). Lỗi kỹ thuật giữ nguyên `PaymentPending` để xử lý lại | Trip |
@@ -222,7 +222,7 @@ stateDiagram-v2
     Requested --> PriceConfirmed: rider đồng ý giá (confirm-price)
     Requested --> Cancelled: rider từ chối giá (cancel)
     PriceConfirmed --> PriceConfirmed: tài xế từ chối hoặc hết giờ, lượt thử nhỏ hơn k
-    PriceConfirmed --> Failed: hết tài xế hoặc vượt k lần thử
+    PriceConfirmed --> Failed: hết tài xế hoặc DeclineCount > k
     PriceConfirmed --> DriverAccepted: tài xế nhận (driver-accept)
     PriceConfirmed --> Cancelled: rider hủy
     DriverAccepted --> EnRoute: tài xế đang đến (enroute)
@@ -244,8 +244,17 @@ stateDiagram-v2
 | Nhánh trong đề | Trạng thái trong code |
 |---|---|
 | Rider từ chối giá → "Kết thúc: Hủy chuyến" | `Requested → Cancelled` |
-| Tài xế từ chối, chưa quá k lần → quay lại tìm tài xế | Ở lại `PriceConfirmed`, `MatchingAttempt` tăng, gửi lại `FindDriverForTripV1` và loại các tài xế đã mời |
-| Tài xế từ chối quá k lần → "Không thành công" | `PriceConfirmed → Failed` |
+| Tài xế từ chối, chưa quá k lần → quay lại tìm tài xế | Ở lại `PriceConfirmed`, `DeclineCount` tăng (từ chối hoặc hết giờ), gửi lại `FindDriverForTripV1` và loại các tài xế đã mời |
+| Tài xế từ chối quá k lần → "Không thành công" | `PriceConfirmed → Failed` khi `DeclineCount > k` |
+
+**Ngưỡng từ chối k (một nơi duy nhất, đổi khi đang chạy).** Giá trị `TripMatching:DeclineThreshold` nằm trong [config/trip/trip-matching.json](../config/trip/trip-matching.json), được mount vào container Trip và nạp lại tự động khi file đổi (`reloadOnChange` + `IOptionsMonitor`, polling cho bind mount), không cần build hay restart. Mỗi lần đổi, Trip ghi log `TripMatching changed at runtime: DeclineThreshold(k)=…`. Logic so sánh nằm ở `TripApplicationService.ResolveInvitationAndContinueAsync`: `if (trip.RecordDecline() > k) MarkFailed()`, đọc k tại thời điểm xử lý nên áp dụng cả cho chuyến đang chạy.
+
+| Quan sát | API |
+|---|---|
+| k đang áp dụng | `GET /api/trips/matching-settings` → `declineThreshold` |
+| Số lần từ chối của chuyến | `GET /api/trips/{id}` → `declineCount`, `declineThreshold` |
+
+Kiểm chứng với k = 1: lần từ chối thứ nhất cho `declineCount = 1`, chuyến vẫn `PriceConfirmed`; lần thứ hai cho `declineCount = 2` và `Failed`; từ chối lặp lại trả 409 và không làm tăng đếm. File cùng chứa `InvitationTimeoutSeconds` (TTL lời mời) và `SearchRadiusKm` (bán kính tìm tài xế), cũng đổi được khi đang chạy.
 | "Thanh toán lỗi / chờ xử lý" | `PaymentPending`: lỗi kỹ thuật được MassTransit retry 1s/3s/5s với cùng idempotency key; vẫn lỗi thì message vào `_error` và chuyến **giữ nguyên** `PaymentPending` để xử lý lại, không trừ tiền lặp và không báo thành công sai |
 | "Thanh toán hoàn tất → Kết thúc: Thành công" | `Paid` |
 
@@ -600,7 +609,7 @@ stateDiagram-v2
 | Bước | Hành động | Hành động bù trừ khi thất bại |
 |---|---|---|
 | Giữ chỗ tài xế (Matching) | `FindDriverForTripV1` giữ chỗ nguyên tử | `ReleaseDriverV1` khi tài xế từ chối hoặc hết giờ, rider hủy, hoặc sau dropoff; `ReservationRecoveryWorker` nhả các chỗ giữ mồ côi |
-| Mời tài xế (Trip) | Tạo `DriverInvitation` | Đóng lời mời, tăng lượt thử, tìm tài xế khác; vượt k thì `Failed` |
+| Mời tài xế (Trip) | Tạo `DriverInvitation` | Đóng lời mời, tăng `DeclineCount`, tìm tài xế khác; `DeclineCount > k` thì `Failed` |
 
 Saga không thay thế transaction nội bộ hay Outbox; nó được xây **trên** hai cơ chế đó.
 

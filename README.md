@@ -39,7 +39,7 @@ flowchart LR
 1. Rider đặt xe (`POST /api/trips`). Trip lấy giá do server tính rồi lưu chuyến ở trạng thái `Requested`.
 2. Rider xác nhận giá (`confirm-price`) hoặc hủy.
 3. Matching tìm tài xế gần nhất trên MongoDB và giữ chỗ nguyên tử. Trip gửi lời mời cho tài xế qua SignalR.
-4. Tài xế nhận hoặc từ chối. Khi từ chối hoặc hết giờ, hệ thống nhả tài xế và thử người khác, tối đa `k = 3` lần, quá giới hạn thì chuyến thành `Failed`.
+4. Tài xế nhận hoặc từ chối. Khi từ chối hoặc hết giờ, hệ thống nhả tài xế, tăng `declineCount` và thử người khác; chuyến chỉ `Failed` khi `declineCount > k`. Ngưỡng `k` (`DeclineThreshold`, mặc định 2), TTL lời mời và bán kính nằm trong [config/trip/trip-matching.json](config/trip/trip-matching.json): sửa file là có hiệu lực ngay, không cần restart (xem `GET /api/trips/matching-settings`).
 5. Tài xế cập nhật `enroute` → `pickup` → `dropoff`.
 6. Dropoff chuyển chuyến sang `PaymentPending` và phát `TripDroppedOffV1` (qua Outbox, cùng transaction). **Saga thanh toán** nhận event và gửi `ProcessPaymentV1`.
 7. Payment ghi sổ cái và phát kết quả: chuyến thành `Paid` khi thành công, `Failed` khi bị từ chối. Quá hạn chờ (mặc định 10 phút) thì saga chuyển chuyến sang `Failed`; nếu tiền về muộn, saga tự gửi lệnh hoàn tiền (bù trừ).

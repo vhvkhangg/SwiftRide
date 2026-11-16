@@ -164,7 +164,7 @@ test('Reject scenario polls each Driver for the reject Trip with separate deadli
     assert.equal(timedOut.failures.length, 1);
 });
 test('Reassigned Trip must still be unassigned and waiting', () => {
-    assert.deepEqual(execute('57 ', { status: 'PriceConfirmed', driverId: null }).failures, []);
+    assert.deepEqual(execute('57 ', { status: 'PriceConfirmed', driverId: null, declineCount: 1, declineThreshold: 2 }).failures, []);
     const accepted = execute('57 ', { status: 'DriverAccepted', driverId: 'driver' });
     assert.equal(accepted.next, null);
     assert.equal(accepted.failures.length, 1);
