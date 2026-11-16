@@ -14,7 +14,7 @@ public static class DevelopmentAccounts
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
-        foreach (var (email, role) in new[] { ("rider.demo@example.com", "Rider"), ("driver.demo@example.com", "Driver"), ("driver.other@example.com", "Driver") })
+        foreach (var (email, role) in new[] { ("rider.demo@example.com", "Rider"), ("driver.demo@example.com", "Driver"), ("driver.other@example.com", "Driver"), ("admin.demo@example.com", "Admin") })
         {
             // Never modify an existing user's password or grant a role based on email.
             if (await db.Users.AnyAsync(x => x.NormalizedEmail == email.ToUpperInvariant())) continue;

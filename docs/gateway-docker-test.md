@@ -24,6 +24,7 @@ Tài khoản demo:
 - rider.demo@example.com
 - driver.demo@example.com
 - driver.other@example.com
+- admin.demo@example.com (Admin, dùng cho refund trong Postman)
 
 Mật khẩu mặc định: SwiftRide-demo-2026!; override bằng DEV_ACCOUNT_PASSWORD và tham số -SeedPassword của test. Seed chỉ tạo user chưa tồn tại, không reset tài khoản cũ.
 

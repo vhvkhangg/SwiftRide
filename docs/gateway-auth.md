@@ -41,6 +41,7 @@ Seed chỉ chạy khi Environment=Development và DevelopmentAccounts:Enabled=tr
 - rider.demo@example.com — Rider
 - driver.demo@example.com — Driver
 - driver.other@example.com — Driver
+- admin.demo@example.com — Admin (chỉ để demo/chấm refund)
 
 Mật khẩu lấy từ DevelopmentAccounts:Password; Compose local mặc định SwiftRide-demo-2026!, có thể override DEV_ACCOUNT_PASSWORD. Tắt seed ở production. Nếu email demo đã bị đăng ký trước, seed không tự nâng quyền; cần kiểm tra tài khoản bằng /auth/me.
 

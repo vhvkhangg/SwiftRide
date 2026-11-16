@@ -36,11 +36,11 @@ function execute(prefix, body, { code = 200, values = {}, now = 1000, event = 't
         expect
     };
     const script = item.event.find(entry => entry.listen === event).script.exec.join('\n');
-    vm.runInNewContext(script, { pm, Date: { now: () => now } });
+    vm.runInNewContext(script, { pm, atob, btoa, Date: { now: () => now } });
     return { state, failures, next, name: item.name };
 }
 test('Collection has unique names, Gateway-only URLs, no persisted tokens and valid script syntax', () => {
-    assert.equal(requests.length, 52);
+    assert.equal(requests.length, 73);
     assert.equal(new Set(requests.map(item => item.name)).size, requests.length);
     assert.deepEqual(collection.variable, []);
     for (const item of requests) {
@@ -67,33 +67,33 @@ test('Login captures tokens only on successful response', () => {
     assert.equal(invalid.failures.length, 1);
 });
 test('Invitation polling repeats, then clears deadline only for matching Trip', () => {
-    const pending = execute('26 ', [{ id: 'other' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
+    const pending = execute('31 ', [{ id: 'other' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
     assert.equal(pending.next, pending.name);
-    const ready = execute('26 ', [{ id: 'trip' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
+    const ready = execute('31 ', [{ id: 'trip' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
     assert.equal(ready.next, undefined);
     assert.equal(ready.state.has('invitationDeadline'), false);
     assert.deepEqual(ready.failures, []);
 });
 test('Invitation timeout fails and stops instead of reporting success', () => {
-    const result = execute('26 ', [], { values: { tripId: 'trip', invitationDeadline: 999 } });
+    const result = execute('31 ', [], { values: { tripId: 'trip', invitationDeadline: 999 } });
     assert.equal(result.next, null);
     assert.equal(result.failures.length, 1);
 });
 test('Poll pre-request keeps original deadline across retries', () => {
-    const first = execute('35 ', {}, { event: 'prerequest' });
+    const first = execute('40 ', {}, { event: 'prerequest' });
     assert.equal(first.state.get('paymentDeadline'), 46000);
-    const retry = execute('35 ', {}, { event: 'prerequest', now: 2000, values: { paymentDeadline: 46000 } });
+    const retry = execute('40 ', {}, { event: 'prerequest', now: 2000, values: { paymentDeadline: 46000 } });
     assert.equal(retry.state.get('paymentDeadline'), 46000);
 });
 test('Payment poll accepts numeric and string Paid states', () => {
     for (const status of [7, 'Paid']) {
-        const result = execute('35 ', { status }, { values: { paymentDeadline: 2000 } });
+        const result = execute('40 ', { status }, { values: { paymentDeadline: 2000 } });
         assert.deepEqual(result.failures, []);
         assert.equal(result.state.has('paymentDeadline'), false);
     }
 });
 test('Payment pending retries; terminal failure, timeout and HTTP error stop', () => {
-    const pending = execute('35 ', { status: 6 }, { values: { paymentDeadline: 2000 } });
+    const pending = execute('40 ', { status: 6 }, { values: { paymentDeadline: 2000 } });
     assert.equal(pending.next, pending.name);
     for (const options of [
         { body: { status: 'Failed' }, values: { paymentDeadline: 2000 } },
@@ -101,13 +101,62 @@ test('Payment pending retries; terminal failure, timeout and HTTP error stop', (
         { body: { status: 6 }, values: { paymentDeadline: 999 } },
         { body: {}, code: 500 }
     ]) {
-        const result = execute('35 ', options.body, options);
+        const result = execute('40 ', options.body, options);
         assert.equal(result.next, null);
         assert.equal(result.failures.length, 1);
     }
 });
 test('Wrong payment amount or key stops flow', () => {
-    const result = execute('36 ', { tripId: 'trip', status: 'Succeeded', amount: 999 }, { values: { tripId: 'trip', fareEstimate: 50000 } });
+    const result = execute('41 ', { tripId: 'trip', status: 'Succeeded', amount: 999 }, { values: { tripId: 'trip', fareEstimate: 50000 } });
     assert.equal(result.next, null);
     assert.equal(result.failures.length, 1);
+});
+function jwt(payload) {
+    const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+    return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(payload)}.c2lnbmF0dXJl`;
+}
+const decodePart = part => JSON.parse(Buffer.from(part, 'base64url').toString());
+test('Forged tokens keep the real signature or drop it, never re-sign', () => {
+    const riderToken = jwt({ sub: 'rider', role: 'Rider', exp: 9999999999 });
+    const signature = riderToken.split('.')[2];
+    const tampered = execute('13 ', {}, { event: 'prerequest', values: { riderToken } }).state.get('tamperedToken').split('.');
+    assert.equal(decodePart(tampered[1]).role, 'Admin');
+    assert.equal(tampered[2], signature);
+    const unsigned = execute('14 ', {}, { event: 'prerequest', values: { riderToken } }).state.get('unsignedToken').split('.');
+    assert.equal(decodePart(unsigned[0]).alg, 'none');
+    assert.equal(unsigned[2], '');
+    const expired = execute('15 ', {}, { event: 'prerequest', values: { riderToken }, now: 2_000_000_000_000 }).state.get('expiredToken').split('.');
+    assert.equal(decodePart(expired[1]).role, 'Rider');
+    assert.ok(decodePart(expired[1]).exp < 2_000_000_000);
+    assert.equal(expired[2], signature);
+});
+test('Admin login stores Admin session only', () => {
+    const result = execute('08 ', { accessToken: 'admin', refreshToken: 'admin-refresh' });
+    assert.equal(result.state.get('adminToken'), 'admin');
+    assert.equal(result.state.get('adminRefresh'), 'admin-refresh');
+    assert.equal(result.state.has('driverToken'), false);
+});
+test('Admin refund must return Refunded payment with Trip fare', () => {
+    const values = { paymentId: 'pay', tripId: 'trip', fareEstimate: '50000' };
+    assert.deepEqual(execute('46 ', { paymentId: 'pay', tripId: 'trip', status: 'Refunded', amount: 50000 }, { values }).failures, []);
+    const wrong = execute('46 ', { paymentId: 'pay', tripId: 'trip', status: 'Succeeded', amount: 50000 }, { values });
+    assert.equal(wrong.next, null);
+    assert.equal(wrong.failures.length, 1);
+    assert.equal(execute('47 ', {}, { code: 200 }).next, null);
+});
+test('Reject scenario polls each Driver for the reject Trip with separate deadlines', () => {
+    const first = execute('52 ', [{ id: 'reject' }], { values: { tripId: 'main', rejectTripId: 'reject', rejectInvitationDeadline: 2000 } });
+    assert.equal(first.next, undefined);
+    assert.equal(first.state.has('rejectInvitationDeadline'), false);
+    const waiting = execute('56 ', [{ id: 'main' }], { values: { tripId: 'main', rejectTripId: 'reject', reassignInvitationDeadline: 2000 } });
+    assert.equal(waiting.next, waiting.name);
+    const timedOut = execute('56 ', [], { values: { rejectTripId: 'reject', reassignInvitationDeadline: 999 } });
+    assert.equal(timedOut.next, null);
+    assert.equal(timedOut.failures.length, 1);
+});
+test('Reassigned Trip must still be unassigned and waiting', () => {
+    assert.deepEqual(execute('57 ', { status: 'PriceConfirmed', driverId: null }).failures, []);
+    const accepted = execute('57 ', { status: 'DriverAccepted', driverId: 'driver' });
+    assert.equal(accepted.next, null);
+    assert.equal(accepted.failures.length, 1);
 });
