@@ -10,18 +10,19 @@ namespace SwiftRide.MatchingService.Application.Services;
 public sealed class PricingService(
     IEnumerable<IPricingStrategy> strategies,
     IDateTimeProvider dateTimeProvider,
-    IMongoDatabase database) : IPricingService
+    IMongoDatabase database,
+    Microsoft.Extensions.Options.IOptionsMonitor<PricingOptions>? options = null) : IPricingService
 {
-    private const decimal CostPerKm = 12m;
-    private const decimal CostPerMinute = 2m;
-    private const decimal VatRate = 0.1m;
-    private const decimal Toll = 0m;
 
     public async Task<QuoteResponse> CalculateAsync(
         QuoteRequest request,
         CancellationToken cancellationToken = default)
     {
         Validate(request);
+        // Đọc tham số hiện hành mỗi lần báo giá: sửa config/matching-settings.json có hiệu lực ngay.
+        var pricing = options?.CurrentValue ?? new PricingOptions();
+        pricing.Validate();
+        var (CostPerKm, CostPerMinute, VatRate, Toll) = (pricing.CostPerKm, pricing.CostPerMinute, pricing.VatRate, pricing.Toll);
         var utcNow = dateTimeProvider.UtcNow;
         var localHour = utcNow.AddHours(7).Hour;
         var surgeMultiplier = await GetSurgeMultiplierAsync(localHour, cancellationToken);

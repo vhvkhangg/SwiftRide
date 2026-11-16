@@ -1,0 +1,11 @@
+{
+  "Pricing": {
+    "CostPerKm": 12,
+    "CostPerMinute": 2,
+    "VatRate": 0.1,
+    "Toll": 0
+  },
+  "DriverAvailability": {
+    "LocationTtlSeconds": 600
+  }
+}

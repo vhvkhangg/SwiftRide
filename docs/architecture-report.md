@@ -81,13 +81,29 @@ return Math.Max(0m, (operating * context.SurgeMultiplier + context.Toll) * conte
 
 | Ký hiệu | Ý nghĩa | Nguồn giá trị |
 |---|---|---|
-| $c_d$, $c_t$ | Đơn giá theo km và theo phút | 12 và 2 (hằng số trong `PricingService`) |
+| $c_d$, $c_t$ | Đơn giá theo km và theo phút | 12 và 2 (`Pricing:CostPerKm`, `Pricing:CostPerMinute`) |
 | $s$ | Hệ số giá động (surge) | Collection `surge_rules` (MongoDB), chọn theo giờ địa phương |
-| $c_m$ | Phí phụ (toll) | 0 (chưa có dữ liệu trạm thu phí) |
+| $c_m$ | Phí phụ (toll) | 0 (`Pricing:Toll`) |
 | $\eta$ | Hệ số khuyến mãi = 1 − tỉ lệ giảm | Collection `promo_codes`, mã được chuẩn hóa ở server |
-| $T$ | Thuế | VAT 10% |
+| $T$ | Thuế | VAT 10% (`Pricing:VatRate`) |
 
 Client không gửi được giá: `fareEstimate` luôn do server tính.
+
+### 2.3.1 Tham số đổi được khi hệ thống đang chạy
+
+Hai file trong thư mục `config/` được mount vào container và nạp lại tự động khi sửa (`reloadOnChange` + `IOptionsMonitor`, bật polling vì bind mount trên Windows/macOS không phát sự kiện file); **không cần build hay restart**. Mỗi lần nạp lại, service ghi log `… changed at runtime: …`. Biến môi trường vẫn ghi đè được (bộ test dùng cách này).
+
+| Tham số | Nơi quyết định (một chỗ duy nhất) | Xem giá trị đang áp dụng | Phạm vi ảnh hưởng |
+|---|---|---|---|
+| Ngưỡng từ chối `k` | `config/trip/trip-matching.json` → `TripMatching:DeclineThreshold` | `GET /api/trips/matching-settings`; `declineCount` trong `GET /api/trips/{id}` | Lần từ chối kế tiếp, kể cả chuyến đang chạy |
+| TTL lời mời tài xế | `config/trip/trip-matching.json` → `InvitationTimeoutSeconds` | `GET /api/trips/matching-settings` | Lời mời tạo sau khi đổi |
+| Bán kính tìm tài xế | `config/trip/trip-matching.json` → `SearchRadiusKm` | `GET /api/trips/matching-settings` | Lượt tìm tài xế kế tiếp |
+| Đơn giá km/phút, VAT, phí phụ | `config/matching/matching-settings.json` → `Pricing:*` | `GET /api/matching/settings`; chi tiết trong `POST /api/matching/quote` | Báo giá và chuyến **mới** (giá chuyến cũ đã chốt lúc tạo) |
+| TTL vị trí tài xế | `config/matching/matching-settings.json` → `DriverAvailability:LocationTtlSeconds` | `GET /api/matching/settings` | Lượt tìm tài xế kế tiếp |
+| Surge | MongoDB collection `surge_rules` (`StartHour`, `EndHour`, `Multiplier`, giờ UTC+7) | `GET /api/matching/settings` → `surgeRules` | Báo giá kế tiếp |
+| Hạn chờ thanh toán (Saga) | Biến `TRIP_PAYMENT_TIMEOUT_SECONDS` (cần recreate container trip-service) | `GET /api/trips/{id}/payment-saga` → `deadlineUtc` | Saga tạo sau khi đổi |
+
+Kiểm chứng trên Docker (2 km, 5 phút, trong khung surge 17–19h ×1.2): báo giá mặc định 44,88; đổi `CostPerKm` 12→20 và `Toll` 0→5 → 71,5; thêm surge ×2,0 cho giờ hiện tại → 115,5. Tài xế cách 3 km: bán kính 1 km → chuyến `Failed` (không có tài xế), 5 km → tài xế được mời. TTL vị trí 10 giây: GPS cũ 12 giây → `Failed`, GPS vừa gửi → được mời.
 
 ### 2.4 Quyết định thiết kế: 3 microservice
 

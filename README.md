@@ -97,6 +97,26 @@ curl -s -X POST http://localhost:8180/realms/swiftride/protocol/openid-connect/t
 
 App mobile đăng nhập bằng Authorization Code + PKCE (client `swiftride-mobile`). Chi tiết: [docs/gateway-auth.md](docs/gateway-auth.md).
 
+### Đổi tham số khi đang chạy (không restart)
+
+Sửa file trong `config/`, lưu lại; vài giây sau service tự nạp và ghi log `changed at runtime`.
+
+| Tham số | Nơi quyết định (một chỗ duy nhất) | Xem giá trị đang áp dụng | Phạm vi ảnh hưởng |
+|---|---|---|---|
+| Ngưỡng từ chối `k` | `config/trip/trip-matching.json` → `TripMatching:DeclineThreshold` | `GET /api/trips/matching-settings`; `declineCount` trong `GET /api/trips/{id}` | Lần từ chối kế tiếp, kể cả chuyến đang chạy |
+| TTL lời mời tài xế | `config/trip/trip-matching.json` → `InvitationTimeoutSeconds` | `GET /api/trips/matching-settings` | Lời mời tạo sau khi đổi |
+| Bán kính tìm tài xế | `config/trip/trip-matching.json` → `SearchRadiusKm` | `GET /api/trips/matching-settings` | Lượt tìm tài xế kế tiếp |
+| Đơn giá km/phút, VAT, phí phụ | `config/matching/matching-settings.json` → `Pricing:*` | `GET /api/matching/settings`; chi tiết trong `POST /api/matching/quote` | Báo giá và chuyến **mới** (giá chuyến cũ đã chốt lúc tạo) |
+| TTL vị trí tài xế | `config/matching/matching-settings.json` → `DriverAvailability:LocationTtlSeconds` | `GET /api/matching/settings` | Lượt tìm tài xế kế tiếp |
+| Surge | MongoDB collection `surge_rules` (`StartHour`, `EndHour`, `Multiplier`, giờ UTC+7) | `GET /api/matching/settings` → `surgeRules` | Báo giá kế tiếp |
+| Hạn chờ thanh toán (Saga) | Biến `TRIP_PAYMENT_TIMEOUT_SECONDS` (cần recreate container trip-service) | `GET /api/trips/{id}/payment-saga` → `deadlineUtc` | Saga tạo sau khi đổi |
+
+Ví dụ thêm surge ×2 cho 17–19h:
+
+```bash
+docker compose exec -T matching-mongodb mongosh --quiet swiftride_matching --eval 'db.surge_rules.insertOne({_id:"demo",StartHour:17,EndHour:19,Multiplier:NumberDecimal("2.0")})'
+```
+
 ### Dừng
 
 ```bash

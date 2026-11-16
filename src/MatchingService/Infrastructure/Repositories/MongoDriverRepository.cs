@@ -6,9 +6,14 @@ using SwiftRide.MatchingService.Domain.Models;
 
 namespace SwiftRide.MatchingService.Infrastructure.Repositories;
 
-public sealed class MongoDriverRepository(IMongoDatabase database) : IDriverRepository
+public sealed class MongoDriverRepository(
+    IMongoDatabase database,
+    Microsoft.Extensions.Options.IOptionsMonitor<SwiftRide.MatchingService.Application.Services.DriverAvailabilityOptions>? availability = null)
+    : IDriverRepository
 {
-    private static readonly TimeSpan DriverLocationValidity = TimeSpan.FromMinutes(10);
+    // TTL vị trí tài xế, đọc từ DriverAvailability:LocationTtlSeconds (đổi khi đang chạy); mặc định 10 phút.
+    private TimeSpan DriverLocationValidity =>
+        (availability?.CurrentValue ?? new SwiftRide.MatchingService.Application.Services.DriverAvailabilityOptions()).LocationTtl;
     private static readonly BsonRegularExpression ValidDriverIdRegex =
         new("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
     private static readonly FilterDefinition<DriverLocation> ValidDriverIdFilter =

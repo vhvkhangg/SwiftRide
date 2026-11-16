@@ -128,6 +128,8 @@ services:
       context: .
       dockerfile: src/MatchingService/Dockerfile
     environment:
+      # config/matching/matching-settings.json (đơn giá, VAT, phí phụ, TTL vị trí) tự nạp lại khi đổi.
+      DOTNET_USE_POLLING_FILE_WATCHER: "true"
       <<: *service-security
       ASPNETCORE_URLS: http://+:8080
       ServiceAuth__ServiceName: matching-service
@@ -138,6 +140,8 @@ services:
       RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-swiftride}
       RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
+    volumes:
+      - ./config/matching:/app/config:ro
     depends_on:
       keycloak:
         condition: service_healthy
