@@ -351,6 +351,8 @@ def scenarios(stack, record):
     finally:
         stack.compose("exec", "-T", "rabbitmq", "rabbitmqctl", "set_vm_memory_high_watermark", "0.6")
         stack.compose("start", "matching-service")
+    # Later scenarios call Matching through the Gateway; wait until the restarted service serves HTTP.
+    wait(lambda: http("GET", stack.url("matching-service") + "/health/ready"))
     wait(lambda: stack.invitation(pending["id"]))
     stack.reconnect(pending["id"])
     check(stack.mongo(f'print(db.drivers.countDocuments({{ReservationTripId:UUID("{pending["id"]}")}}))') == "1", "Reservation duplicated on replay")
