@@ -45,4 +45,4 @@ Không chạy down -v nếu muốn giữ dữ liệu. Muốn import lại realm 
 
 Volume `auth-postgres-data` của phiên bản cũ (Gateway tự cấp JWT) không còn được dùng; có thể giữ để tham khảo hoặc tự xóa khi chắc chắn không cần.
 
-Routes và thiết kế quyền chi tiết ở gateway-auth.md. Products/Orders là route mẫu, chưa có service triển khai.
+Route YARP nằm trong mục `ReverseProxy` của src/ApiGateway/appsettings.json; thiết kế quyền chi tiết ở gateway-auth.md.

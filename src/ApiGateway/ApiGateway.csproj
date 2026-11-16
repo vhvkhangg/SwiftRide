@@ -6,10 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
-    <PackageReference Include="Ocelot" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Update="ocelot.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <PackageReference Include="Yarp.ReverseProxy" />
   </ItemGroup>
   <ItemGroup><Compile Include="../Shared/ServiceSecurity.cs" Link="Security/ServiceSecurity.cs" /></ItemGroup>
 </Project>

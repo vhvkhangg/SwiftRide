@@ -228,30 +228,10 @@ services:
       Authentication__MetadataAddress: http://keycloak:8080/realms/swiftride/.well-known/openid-configuration
       Authentication__RequireHttpsMetadata: "false"
       Authentication__Audience: swiftride-api
-      Routes__0__DownstreamHostAndPorts__0__Host: trip-service
-      Routes__0__DownstreamHostAndPorts__0__Port: 8080
-      Routes__1__DownstreamHostAndPorts__0__Host: matching-service
-      Routes__1__DownstreamHostAndPorts__0__Port: 8080
-      Routes__2__DownstreamHostAndPorts__0__Host: payment-service
-      Routes__2__DownstreamHostAndPorts__0__Port: 8080
-      Routes__6__DownstreamHostAndPorts__0__Host: matching-service
-      Routes__6__DownstreamHostAndPorts__0__Port: 8080
-      Routes__7__DownstreamHostAndPorts__0__Host: matching-service
-      Routes__7__DownstreamHostAndPorts__0__Port: 8080
-      Routes__8__UpstreamPathTemplate: /api/hubs/trips
-      Routes__8__UpstreamHttpMethod__0: GET
-      Routes__8__DownstreamPathTemplate: /hubs/trips
-      Routes__8__DownstreamScheme: ws
-      Routes__8__DownstreamHostAndPorts__0__Host: trip-service
-      Routes__8__DownstreamHostAndPorts__0__Port: 8080
-      Routes__9__UpstreamPathTemplate: /api/hubs/trips/{everything}
-      Routes__9__UpstreamHttpMethod__0: GET
-      Routes__9__UpstreamHttpMethod__1: POST
-      Routes__9__UpstreamHttpMethod__2: DELETE
-      Routes__9__DownstreamPathTemplate: /hubs/trips/{everything}
-      Routes__9__DownstreamScheme: http
-      Routes__9__DownstreamHostAndPorts__0__Host: trip-service
-      Routes__9__DownstreamHostAndPorts__0__Port: 8080
+      # YARP cluster destinations (routes are in src/ApiGateway/appsettings.json)
+      ReverseProxy__Clusters__trip__Destinations__primary__Address: http://trip-service:8080/
+      ReverseProxy__Clusters__matching__Destinations__primary__Address: http://matching-service:8080/
+      ReverseProxy__Clusters__payment__Destinations__primary__Address: http://payment-service:8080/
     depends_on:
       keycloak:
         condition: service_healthy

@@ -32,7 +32,7 @@ SwiftRide là sàn đặt xe hai phía kết nối **rider** và **driver**, xâ
 
 Ngoài phần bắt buộc, hệ thống có thêm các phần mở rộng mà đề nêu:
 
-- **API Gateway**: Ocelot.
+- **API Gateway**: YARP (Yet Another Reverse Proxy).
 - **Identity Provider**: Keycloak (OAuth 2.0 / OpenID Connect).
 - **Message broker**: RabbitMQ qua MassTransit.
 - **Transactional Outbox/Inbox**.
@@ -114,7 +114,7 @@ flowchart LR
     KC["Keycloak<br/>realm swiftride<br/>OAuth 2.0 / OIDC"]
     KCDB[("PostgreSQL<br/>keycloak")]
 
-    GW["API Gateway<br/>Ocelot + JWT Bearer"]
+    GW["API Gateway<br/>YARP + JWT Bearer"]
 
     subgraph Services["Application (Microservices)"]
         T["Trip Service<br/>state machine, SignalR hub"]
@@ -150,17 +150,21 @@ Giao tiếp **đồng bộ** (REST) chỉ dùng khi cần câu trả lời ngay:
 |---|---|---|
 | **Presentation (Client)** | `mobile/apps/rider`, `mobile/apps/driver` (React Native + Expo, dùng chung `mobile/shared`) | UI/UX, kiểm tra dữ liệu đầu vào. Mọi quy tắc nghiệp vụ quyết định vẫn kiểm tra lại ở server |
 | **Identity** | Keycloak, realm `swiftride` ([keycloak/swiftride-realm.json](../keycloak/swiftride-realm.json)) | Đăng ký, đăng nhập (Authorization Code + PKCE cho app), cấp token RS256, quản lý vai trò Rider/Driver/Admin |
-| **Edge / Gateway** | `src/ApiGateway` (Ocelot) | Điểm vào duy nhất, định tuyến, xác thực JWT trước khi proxy, xóa header `X-User-*` giả mạo, chuyển tiếp WebSocket SignalR |
+| **Edge / Gateway** | `src/ApiGateway` (YARP) | Điểm vào duy nhất, định tuyến, xác thực JWT trước khi proxy, xóa header `X-User-*` giả mạo, chuyển tiếp WebSocket SignalR |
 | **Application (Microservices)** | `src/TripService`, `src/MatchingService`, `src/PaymentService` | Nghiệp vụ; mỗi service tự kiểm tra lại token và quyền trên tài nguyên |
 | **Integration** | RabbitMQ + MassTransit; contracts trong `src/SwiftRide.Contracts` | Truyền command/event có version (`…V1`) |
 
 ### 3.3 API Gateway
 
-Nhóm dùng **Ocelot** thay vì YARP. Đề cho phép cả hai ("Ocelot dễ tiếp cận trong .NET"). Lý do chọn Ocelot:
+Gateway dùng **YARP** (`Yarp.ReverseProxy`), đúng lựa chọn đề xuất của đề:
 
-- Định tuyến khai báo hoàn toàn bằng [ocelot.json](../src/ApiGateway/ocelot.json).
-- Có sẵn `DelegatingHandler` để can thiệp request; nhóm dùng nó để xóa và gắn lại header danh tính ([IdentityHeaders.cs](../src/ApiGateway/Proxy/IdentityHeaders.cs)).
-- Hỗ trợ proxy WebSocket cho SignalR.
+- Do Microsoft phát triển, chạy như middleware ASP.NET Core nên dùng chung pipeline xác thực/ủy quyền: mọi route khai báo `AuthorizationPolicy: "default"`, nên request không có JWT hợp lệ bị chặn 401 **ngay tại Gateway** trước khi proxy.
+- Route và cluster khai báo trong mục `ReverseProxy` của [appsettings.json](../src/ApiGateway/appsettings.json); Compose chỉ ghi đè địa chỉ cluster (`ReverseProxy__Clusters__trip__Destinations__primary__Address`…).
+- Path transform (`PathRemovePrefix`, `PathSet`) ánh xạ URL công khai sang URL của service.
+- Request transform [IdentityHeaders.cs](../src/ApiGateway/Proxy/IdentityHeaders.cs) xóa header `X-User-*` và cookie do client gửi, gắn lại danh tính đã xác thực để quan sát; header `Authorization` được giữ để service kiểm tra lại.
+- Proxy WebSocket cho SignalR có sẵn, không cần cấu hình thêm.
+
+Ghi chú: phiên bản đầu dùng Ocelot; nhóm chuyển sang YARP để bám đề xuất của đề và thống nhất pipeline bảo mật với ASP.NET Core.
 
 | Gateway (public) | Service đích |
 |---|---|
@@ -443,7 +447,7 @@ Lợi ích thấy được ngay trong kiểm thử: `TripApplicationServiceTests
 | **Repository** | DDD | Trừu tượng hóa truy cập CSDL cho từng service | `TripRepository`, `TripWorkflowRepository`, `MongoDriverRepository`, `PaymentRepository` |
 | **Unit of Work** | Enterprise | Gom thay đổi trạng thái và message Outbox vào một transaction | `ITripUnitOfWork` / `TripUnitOfWork` |
 | **Observer / Pub-Sub** | Behavioral | Sự kiện domain qua RabbitMQ; SignalR đẩy `tripChanged`/`driverInvitation` | `SwiftRide.Messaging`, `TripNotificationHub` |
-| **API Gateway** | Architectural | Một điểm vào cho client (Ocelot) | `src/ApiGateway` |
+| **API Gateway** | Architectural | Một điểm vào cho client (YARP) | `src/ApiGateway` |
 | **Saga (choreography)** | Architectural | Quy trình nhiều service với hành động bù trừ (mục 9.2) | Consumers trong Trip/Matching/Payment |
 | **Transactional Outbox / Inbox** | Architectural | Ghi dữ liệu và message trong cùng transaction; chống xử lý trùng | MassTransit EF Outbox (Trip, Payment), migration `AddTripOutbox`, `AddPaymentConsumerOutbox` |
 | **Idempotent Consumer** | Integration | Message trùng không tạo payment hay ledger thứ hai | `PaymentApplicationService`, unique index idempotency key |
@@ -460,9 +464,9 @@ Lợi ích thấy được ngay trong kiểm thử: `TripApplicationServiceTests
 
 | Thành phần | Đề xuất của đề | SwiftRide |
 |---|---|---|
-| Runtime / Framework | .NET 10 (LTS), ASP.NET Core | **.NET 10**, ASP.NET Core Minimal API; Gateway chạy Ocelot middleware |
+| Runtime / Framework | .NET 10 (LTS), ASP.NET Core | **.NET 10**, ASP.NET Core Minimal API; Gateway là YARP middleware |
 | ORM / Data | EF Core 10 (SQL Server, PostgreSQL), MongoDB.Driver | **EF Core 10 + Npgsql**, **MongoDB.Driver 3** |
-| API Gateway | YARP | **Ocelot 25** (đề cũng nêu Ocelot là lựa chọn hợp lệ) |
+| API Gateway | YARP | **YARP 2.3** (`Yarp.ReverseProxy`) |
 | Message Broker | RabbitMQ qua MassTransit | **RabbitMQ 4.1 + MassTransit 8.5** (EF Outbox/Inbox) |
 | Xác thực | OAuth 2.0 / OIDC, JWT Bearer | **Keycloak 26** (OIDC, Authorization Code + PKCE), JWT Bearer RS256 qua JWKS |
 | Realtime | — | **SignalR** (WebSocket qua Gateway) |
@@ -478,7 +482,7 @@ Phiên bản NuGet được quản lý tập trung trong `Directory.Packages.pro
 ```text
 SwiftRide/
 ├── src/
-│   ├── ApiGateway/                # Ocelot, xác thực JWT (Keycloak), IdentityHeaders
+│   ├── ApiGateway/                # YARP, xác thực JWT (Keycloak), IdentityHeaders transform
 │   ├── TripService/
 │   │   ├── Domain/                # Trip, DriverInvitation, TripState (State pattern), ITripReader/Writer
 │   │   ├── Application/           # TripApplicationService, consumers, DTOs, workers
@@ -581,7 +585,6 @@ Saga không thay thế transaction nội bộ hay Outbox; nó được xây **tr
 
 | Đề đề xuất | SwiftRide | Lý do |
 |---|---|---|
-| YARP | Ocelot | Đề cho phép; cấu hình khai báo, có DelegatingHandler, proxy WebSocket |
 | SQL Server cho Trip | PostgreSQL | Đề cho phép cùng loại CSDL nếu tách database; giảm chi phí vận hành |
 | `POST /payments` public | Không mở | Thanh toán chỉ khởi tạo từ dropoff; client không tự tạo/lặp thanh toán được |
 | Factory `PaymentMethod` | Static factory method trên entity | Chỉ có một phương thức thanh toán mô phỏng |

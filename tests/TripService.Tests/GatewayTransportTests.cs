@@ -77,11 +77,8 @@ public sealed class GatewayTransportTests
         foreach (var (key, value) in Users.Settings($"http://127.0.0.1:{port}/.well-known/openid-configuration"))
             start.ArgumentList.Add($"--{key}={value}");
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
-        foreach (var index in new[] { 0, 8, 9 })
-        {
-            start.Environment[$"Routes__{index}__DownstreamHostAndPorts__0__Host"] = "127.0.0.1";
-            start.Environment[$"Routes__{index}__DownstreamHostAndPorts__0__Port"] = port.ToString();
-        }
+        // Point the YARP "trip" cluster (trips + SignalR hub routes) at the in-process Trip host.
+        start.Environment["ReverseProxy__Clusters__trip__Destinations__primary__Address"] = $"http://127.0.0.1:{port}/";
         var listening = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var gateway = new Process { StartInfo = start, EnableRaisingEvents = true };
         gateway.OutputDataReceived += (_, output) =>

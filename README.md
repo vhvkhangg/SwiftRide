@@ -8,7 +8,7 @@ SwiftRide là bài tập lớn môn **Kiến trúc Phần mềm** (Trường Đ�
 
 | Thành phần | Vai trò | Công nghệ / dữ liệu |
 |---|---|---|
-| **API Gateway** | Điểm vào duy nhất, định tuyến, xác thực JWT, proxy SignalR | Ocelot |
+| **API Gateway** | Điểm vào duy nhất, định tuyến, xác thực JWT, proxy SignalR | YARP |
 | **Keycloak** | Identity Provider: đăng ký, đăng nhập, vai trò Rider/Driver/Admin, cấp token RS256 | Keycloak 26 (OAuth 2.0 / OIDC) + PostgreSQL riêng |
 | **Trip Service** | Vòng đời chuyến (State pattern), lời mời tài xế, điều phối Saga, SignalR | PostgreSQL `TripDB` |
 | **Matching & Pricing Service** | Tìm và giữ chỗ tài xế bằng geo-query, tính giá (Strategy) | MongoDB `MatchDB` |
@@ -21,7 +21,7 @@ SwiftRide là bài tập lớn môn **Kiến trúc Phần mềm** (Trường Đ�
 ```mermaid
 flowchart LR
     C["Rider / Driver App<br/>Postman"] -- "đăng nhập" --> KC["Keycloak"]
-    C -- "Bearer token, SignalR" --> GW["API Gateway<br/>Ocelot"]
+    C -- "Bearer token, SignalR" --> GW["API Gateway<br/>YARP"]
     GW -. "JWKS" .-> KC
     GW --> T["Trip"] & M["Matching & Pricing"] & P["Payment"]
     T --- TDB[("PostgreSQL<br/>TripDB")]
@@ -121,7 +121,7 @@ CI (GitHub Actions) chạy build, unit test, system suite và nghiệm thu Gatew
 ```text
 SwiftRide/
 ├── src/
-│   ├── ApiGateway/                # Ocelot + xác thực JWT (Keycloak)
+│   ├── ApiGateway/                # YARP + xác thực JWT (Keycloak)
 │   ├── TripService/               # Domain / Application / Infrastructure / Api / Migrations
 │   ├── MatchingService/           # Domain / Application / Infrastructure / Api
 │   ├── PaymentService/            # Domain / Application / Infrastructure / Api

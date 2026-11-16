@@ -1,12 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using SwiftRide.ApiGateway.Proxy;
 using SwiftRide.Security;
-using Ocelot.DependencyInjection;
-using Ocelot.Middleware;
+using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Configuration.AddJsonFile("ocelot.json", optional: false, reloadOnChange: false).AddEnvironmentVariables();
-
 builder.Services.AddProblemDetails();
 builder.Services.AddHttpClient("keycloak", client => client.Timeout = TimeSpan.FromSeconds(5));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
@@ -33,9 +30,12 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             }
         };
     });
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddOcelot(builder.Configuration)
-    .AddDelegatingHandler<IdentityHeaders>(global: true);
+// Default policy = authenticated user; every proxied route uses it (AuthorizationPolicy "default").
+builder.Services.AddAuthorization();
+// YARP: routes/clusters in appsettings.json section "ReverseProxy"; Compose overrides cluster addresses.
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
+    .AddTransforms(context => context.AddRequestTransform(IdentityHeaders.ApplyAsync));
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
@@ -65,6 +65,7 @@ app.MapWhen(context => context.Request.Path.StartsWithSegments("/health"), local
     });
 });
 app.UseWebSockets();
+app.UseRouting();
 app.UseAuthentication();
 app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"), hub =>
 {
@@ -80,12 +81,11 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
-        foreach (var header in IdentityHeaders.Names) context.Request.Headers.Remove(header);
-        context.Request.Headers.Remove("Cookie");
         await next(context);
     });
 });
-await app.UseOcelot();
+app.UseAuthorization();
+app.MapReverseProxy();
 await app.RunAsync();
 
 public partial class Program { }

@@ -2,13 +2,13 @@
 
 Hợp đồng HTTP/SignalR cho mobile: [mobile-api-contract.md](mobile-api-contract.md).
 
-SwiftRide dùng **Keycloak** làm Identity Provider theo chuẩn **OAuth 2.0 / OpenID Connect**. Keycloak quản lý user, mật khẩu, vai trò, phiên đăng nhập và cấp access token **RS256**. API Gateway (Ocelot) và ba service **không phát token, không lưu mật khẩu**; chúng chỉ kiểm tra token bằng public key (JWKS) của Keycloak.
+SwiftRide dùng **Keycloak** làm Identity Provider theo chuẩn **OAuth 2.0 / OpenID Connect**. Keycloak quản lý user, mật khẩu, vai trò, phiên đăng nhập và cấp access token **RS256**. API Gateway (YARP) và ba service **không phát token, không lưu mật khẩu**; chúng chỉ kiểm tra token bằng public key (JWKS) của Keycloak.
 
 ```text
 Rider/Driver app ──(Authorization Code + PKCE)──► Keycloak realm "swiftride"
         │                                              │ access token RS256 (iss, aud=swiftride-api, sub, role)
         ▼                                              ▼
-   API Gateway (Ocelot) ── kiểm tra JWT qua JWKS ── Trip / Matching / Payment (kiểm tra lại JWT)
+   API Gateway (YARP)   ── kiểm tra JWT qua JWKS ── Trip / Matching / Payment (kiểm tra lại JWT)
 ```
 
 ## Realm `swiftride`
@@ -99,7 +99,7 @@ Gọi nội bộ giữa service vẫn dùng token HS256 riêng (`ServiceAuth:Sec
 - matching-service: đọc snapshot và tạo `/internal/trips/{id}/invitations`.
 - trip-service: gọi `/internal/quote` của Matching.
 
-Endpoints `/internal/*` không được Ocelot proxy. Hướng nâng cấp: chuyển sang Keycloak client credentials (mỗi service một confidential client).
+Endpoints `/internal/*` không có route trong YARP nên không ra được ngoài Gateway. Hướng nâng cấp: chuyển sang Keycloak client credentials (mỗi service một confidential client).
 
 ## Chạy Docker
 
@@ -139,5 +139,5 @@ Keycloak vẫn chạy trong Compose (`docker compose up -d keycloak`).
 Nguồn chính thức:
 - https://www.keycloak.org/server/importExport
 - https://www.keycloak.org/server/hostname
-- https://ocelot.readthedocs.io/en/latest/features/authentication.html
+- https://learn.microsoft.com/aspnet/core/fundamentals/servers/yarp/yarp-overview
 - https://learn.microsoft.com/aspnet/core/security/authentication/configure-jwt-bearer-authentication
