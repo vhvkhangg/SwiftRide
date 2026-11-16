@@ -20,13 +20,14 @@ using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Domain.Entities;
 using SwiftRide.TripService.Domain.Enums;
 using SwiftRide.TripService.Infrastructure;
+using SwiftRide.Tests.Shared;
 using Xunit;
 
 namespace SwiftRide.TripService.Tests;
 
 public sealed class GatewayTransportTests
 {
-    private const string UserKey = "gateway-transport-test-user-key-at-least-32-bytes";
+    private static readonly TestOidcIssuer Users = new();
 
     [Fact]
     public async Task RealGateway_ProtectsHttpAndWebSocketsAndIsolatesRecipients()
@@ -38,12 +39,10 @@ public sealed class GatewayTransportTests
         builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
-            ["JwtSettings:Audience"] = "SwiftRide.Client",
-            ["JwtSettings:SecretKey"] = UserKey,
             ["ServiceAuth:SecretKey"] = "gateway-transport-test-service-key-at-least-32-bytes"
-        });
+        }).AddInMemoryCollection(Users.Settings());
         builder.Services.AddServiceSecurity(builder.Configuration);
+        Users.TrustIn(builder.Services);
         builder.Services.AddSignalR();
         var databaseName = Guid.NewGuid().ToString();
         builder.Services.AddDbContext<TripDbContext>(options => options.UseInMemoryDatabase(databaseName));
@@ -54,6 +53,8 @@ public sealed class GatewayTransportTests
         downstream.UseAuthentication();
         downstream.UseAuthorization();
         downstream.MapTripEndpoints();
+        // The downstream host doubles as the fake Keycloak discovery/JWKS endpoint for the real Gateway.
+        Users.MapDiscovery(downstream, () => downstream.Urls.Single());
         downstream.MapHub<TripNotificationHub>("/hubs/trips", options => options.CloseOnAuthenticationExpiration = true);
         await downstream.StartAsync(ct);
 
@@ -72,13 +73,10 @@ public sealed class GatewayTransportTests
         };
         start.ArgumentList.Add(Path.Combine(gatewayFolder, "bin", configuration, "net10.0", "ApiGateway.dll"));
         start.ArgumentList.Add("--urls=http://127.0.0.1:0");
-        start.ArgumentList.Add("--AuthDatabase:EnsureCreated=false");
-        start.ArgumentList.Add("--DevelopmentAccounts:Enabled=false");
-        start.ArgumentList.Add($"--JwtSettings:SecretKey={UserKey}");
-        start.ArgumentList.Add("--JwtSettings:Issuer=SwiftRide.Gateway");
-        start.ArgumentList.Add("--JwtSettings:Audience=SwiftRide.Client");
-        start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
         var port = new Uri(downstream.Urls.Single()).Port;
+        foreach (var (key, value) in Users.Settings($"http://127.0.0.1:{port}/.well-known/openid-configuration"))
+            start.ArgumentList.Add($"--{key}={value}");
+        start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
         foreach (var index in new[] { 0, 8, 9 })
         {
             start.Environment[$"Routes__{index}__DownstreamHostAndPorts__0__Host"] = "127.0.0.1";
@@ -140,6 +138,8 @@ public sealed class GatewayTransportTests
             await Check("/api/trips/driver/invitations", Token(driver.ToString(), "Driver"), HttpStatusCode.OK);
             await Check("/api/trips/driver/invitations", Token("bad-subject", "Driver"), HttpStatusCode.Unauthorized);
             await Check("/api/trips/driver/invitations", Token(driver.ToString(), "Driver", true), HttpStatusCode.Unauthorized);
+            await Check("/api/trips/driver/invitations", Users.Token(driver.ToString(), "Driver", foreignKey: true), HttpStatusCode.Unauthorized);
+            await Check("/api/trips/driver/invitations", Users.Token(driver.ToString(), "Driver", audience: "account"), HttpStatusCode.Unauthorized);
             await Check($"/api/trips/{ownedTrip.Id}", riderToken, HttpStatusCode.OK);
             await Check($"/api/trips/{ownedTrip.Id}", Token(other.ToString(), "Rider"), HttpStatusCode.Forbidden);
             await Check($"/api/trips/{ownedTrip.Id}/cancel", Token(other.ToString(), "Rider"), HttpStatusCode.Forbidden, true);
@@ -264,8 +264,5 @@ public sealed class GatewayTransportTests
     }
 
     private static string Token(string subject, string role, bool expired = false) =>
-        new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
-            "SwiftRide.Gateway", "SwiftRide.Client", [new Claim("sub", subject), new Claim("role", role)],
-            DateTime.UtcNow.AddMinutes(-10), DateTime.UtcNow.AddMinutes(expired ? -1 : 5),
-            new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(UserKey)), SecurityAlgorithms.HmacSha256)));
+        Users.Token(subject, role, expired: expired);
 }

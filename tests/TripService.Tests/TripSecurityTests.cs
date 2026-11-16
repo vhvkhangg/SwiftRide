@@ -16,13 +16,14 @@ using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
 using SwiftRide.TripService.Domain.Enums;
 using SwiftRide.TripService.Infrastructure;
+using SwiftRide.Tests.Shared;
 using Xunit;
 
 namespace SwiftRide.TripService.Tests;
 
 public sealed class TripSecurityTests
 {
-    private const string UserKey = "test-user-signing-key-at-least-32-bytes-long";
+    private static readonly TestOidcIssuer Users = new();
     private const string ServiceKey = "test-service-signing-key-at-least-32-bytes-long";
 
     [Fact]
@@ -32,13 +33,11 @@ public sealed class TripSecurityTests
         builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
-            ["JwtSettings:Audience"] = "SwiftRide.Client",
-            ["JwtSettings:SecretKey"] = UserKey,
             ["ServiceAuth:SecretKey"] = ServiceKey
-        });
+        }).AddInMemoryCollection(Users.Settings());
         var security = typeof(TripEndpoints).Assembly.GetType("SwiftRide.Security.ServiceSecurity")!;
         security.GetMethod("AddServiceSecurity")!.Invoke(null, [builder.Services, builder.Configuration]);
+        Users.TrustIn(builder.Services);
         builder.Services.AddDbContext<TripDbContext>(options => options.UseNpgsql(
             "Host=localhost;Database=unused_security_test;Username=unused;Password=unused"));
         var trips = new Mock<ITripApplicationService>();
@@ -80,6 +79,8 @@ public sealed class TripSecurityTests
         await Check("/trips/", Token(riderId.ToString(), "Rider", audience: "wrong"), HttpStatusCode.Unauthorized, true);
         await Check("/trips/", Token(riderId.ToString(), "Rider", expired: true), HttpStatusCode.Unauthorized, true);
         await Check("/trips/", Token(riderId.ToString(), "Rider", key: ServiceKey), HttpStatusCode.Unauthorized, true);
+        await Check("/trips/", Users.Token(riderId.ToString(), "Rider", foreignKey: true), HttpStatusCode.Unauthorized, true);
+        await Check("/trips/", Users.Token(riderId.ToString(), "Rider", issuer: "http://evil.test/realms/swiftride"), HttpStatusCode.Unauthorized, true);
         await Check("/trips/", Token(riderId.ToString(), "Rider"), HttpStatusCode.Created, true);
         Assert.Equal(riderId, received!.RiderId);
         trips.Verify(service => service.CreateAsync(It.IsAny<CreateTripRequest>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -101,13 +102,11 @@ public sealed class TripSecurityTests
         builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
-            ["JwtSettings:Audience"] = "SwiftRide.Client",
-            ["JwtSettings:SecretKey"] = UserKey,
             ["ServiceAuth:SecretKey"] = ServiceKey
-        });
+        }).AddInMemoryCollection(Users.Settings());
         var security = typeof(TripEndpoints).Assembly.GetType("SwiftRide.Security.ServiceSecurity")!;
         security.GetMethod("AddServiceSecurity")!.Invoke(null, [builder.Services, builder.Configuration]);
+        Users.TrustIn(builder.Services);
         
         builder.Services.AddDbContext<TripDbContext>(options =>
             options.UseInMemoryDatabase(dbName, dbRoot));
@@ -166,13 +165,11 @@ public sealed class TripSecurityTests
         builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["JwtSettings:Issuer"] = "SwiftRide.Gateway",
-            ["JwtSettings:Audience"] = "SwiftRide.Client",
-            ["JwtSettings:SecretKey"] = UserKey,
             ["ServiceAuth:SecretKey"] = ServiceKey
-        });
+        }).AddInMemoryCollection(Users.Settings());
         var security = typeof(TripEndpoints).Assembly.GetType("SwiftRide.Security.ServiceSecurity")!;
         security.GetMethod("AddServiceSecurity")!.Invoke(null, [builder.Services, builder.Configuration]);
+        Users.TrustIn(builder.Services);
         builder.Services.AddDbContext<TripDbContext>(options =>
             options.UseInMemoryDatabase($"snapshot-unauth-{Guid.NewGuid()}"));
         var trips = new Mock<ITripApplicationService>();
@@ -211,13 +208,13 @@ public sealed class TripSecurityTests
     private static string Token(string subject, string role, bool service = false,
         string? audience = null, bool expired = false, string? key = null)
     {
+        if (!service) return Users.Token(subject, role, audience, expired, hmacKey: key);
         var now = DateTime.UtcNow;
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
-            service ? "SwiftRide.Services" : "SwiftRide.Gateway",
-            audience ?? (service ? "SwiftRide.Internal" : "SwiftRide.Client"),
+            "SwiftRide.Services", audience ?? "SwiftRide.Internal",
             [new Claim("sub", subject), new Claim("role", role)],
             now.AddMinutes(-10), expired ? now.AddMinutes(-1) : now.AddMinutes(5),
-            new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
-                key ?? (service ? ServiceKey : UserKey))), SecurityAlgorithms.HmacSha256)));
+            new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key ?? ServiceKey)),
+                SecurityAlgorithms.HmacSha256)));
     }
 }

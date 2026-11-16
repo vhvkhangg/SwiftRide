@@ -1,8 +1,10 @@
-# Local development/test stack. Default credentials and JWT key are public test values only.
+# Local development/test stack. Default credentials and keys are public test values only.
+# User tokens are issued by Keycloak (realm swiftride) and validated through its JWKS.
 x-service-security: &service-security
-  JwtSettings__Issuer: SwiftRide.Gateway
-  JwtSettings__Audience: SwiftRide.Client
-  JwtSettings__SecretKey: ${JWT_SECRET_KEY:-swiftride-local-test-only-signing-key-at-least-32-bytes-2026}
+  Authentication__Authority: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}/realms/swiftride
+  Authentication__MetadataAddress: http://keycloak:8080/realms/swiftride/.well-known/openid-configuration
+  Authentication__RequireHttpsMetadata: "false"
+  Authentication__Audience: swiftride-api
   ServiceAuth__SecretKey: ${SERVICE_AUTH_SECRET_KEY:-swiftride-local-internal-only-signing-key-at-least-32-bytes-2026}
 
 services:
@@ -102,6 +104,8 @@ services:
       RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
     depends_on:
+      keycloak:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       messaging-setup:
@@ -129,6 +133,8 @@ services:
       RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
     depends_on:
+      keycloak:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       matching-mongodb:
@@ -155,6 +161,8 @@ services:
       RabbitMq__Username: ${RABBITMQ_USER:-swiftride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-swiftride_dev}
     depends_on:
+      keycloak:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       payment-postgres:
@@ -164,21 +172,51 @@ services:
     ports:
       - "5103:8080"
 
-  auth-postgres:
+  keycloak-postgres:
     image: postgres:18
     environment:
-      POSTGRES_DB: swiftride_auth
-      POSTGRES_USER: swiftride
-      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-gateway_test_password}
-    ports:
-      - "127.0.0.1:5435:5432"
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev}
     volumes:
-      - auth-postgres-data:/var/lib/postgresql
+      - keycloak-postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev}
+      # Issuer is fixed to the public URL; containers fetch metadata/JWKS through the backchannel.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-keycloak-admin-dev}
+      # Realm import resolves ${DEV_ACCOUNT_PASSWORD} for the seeded demo accounts (first import only).
+      DEV_ACCOUNT_PASSWORD: ${DEV_ACCOUNT_PASSWORD:-SwiftRide-demo-2026!}
+    volumes:
+      - ./keycloak/swiftride-realm.json:/opt/keycloak/data/import/swiftride-realm.json:ro
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    ports:
+      - "8180:8080"
+
   api-gateway:
     build:
       context: .
@@ -186,12 +224,10 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
-      AuthDatabase__Migrate: ${AUTH_DB_MIGRATE:-false}
-      AuthDatabase__EnsureCreated: ${AUTH_DB_ENSURE_CREATED:-true}
-      DevelopmentAccounts__Enabled: "true"
-      DevelopmentAccounts__Password: ${DEV_ACCOUNT_PASSWORD:-SwiftRide-demo-2026!}
-      ConnectionStrings__AuthDb: Host=auth-postgres;Port=5432;Database=swiftride_auth;Username=swiftride;Password=${AUTH_DB_PASSWORD:-gateway_test_password}
-      JwtSettings__SecretKey: ${JWT_SECRET_KEY:-swiftride-local-test-only-signing-key-at-least-32-bytes-2026}
+      Authentication__Authority: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}/realms/swiftride
+      Authentication__MetadataAddress: http://keycloak:8080/realms/swiftride/.well-known/openid-configuration
+      Authentication__RequireHttpsMetadata: "false"
+      Authentication__Audience: swiftride-api
       Routes__0__DownstreamHostAndPorts__0__Host: trip-service
       Routes__0__DownstreamHostAndPorts__0__Port: 8080
       Routes__1__DownstreamHostAndPorts__0__Host: matching-service
@@ -217,7 +253,7 @@ services:
       Routes__9__DownstreamHostAndPorts__0__Host: trip-service
       Routes__9__DownstreamHostAndPorts__0__Port: 8080
     depends_on:
-      auth-postgres:
+      keycloak:
         condition: service_healthy
       trip-service:
         condition: service_started
@@ -230,7 +266,7 @@ services:
 
 volumes:
   rabbitmq-data:
-  auth-postgres-data:
+  keycloak-postgres-data:
   trip-postgres-data:
   matching-mongo-data:
   payment-postgres-data:

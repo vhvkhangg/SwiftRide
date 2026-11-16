@@ -1,0 +1,157 @@
+{
+  "realm": "swiftride",
+  "displayName": "SwiftRide",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "passwordPolicy": "length(12) and notUsername",
+  "roles": {
+    "realm": [
+      { "name": "Rider", "description": "Hanh khach; cap mac dinh khi tu dang ky" },
+      { "name": "Driver", "description": "Tai xe; chi cap qua quan tri" },
+      { "name": "Admin", "description": "Quan tri; refund va thao tac van hanh" },
+      { "name": "offline_access", "description": "${role_offline-access}" },
+      { "name": "uma_authorization", "description": "${role_uma_authorization}" }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-swiftride",
+    "description": "Self-registered users become Riders only",
+    "composite": true,
+    "composites": { "realm": ["Rider"] }
+  },
+  "clients": [
+    {
+      "clientId": "swiftride-mobile",
+      "name": "SwiftRide Rider/Driver apps",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "swiftride-rider://*",
+        "swiftride-driver://*",
+        "exp://*",
+        "http://localhost:8081/*",
+        "http://localhost:19006/*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "defaultClientScopes": ["basic", "profile", "email", "roles", "web-origins", "acr"],
+      "protocolMappers": [
+        {
+          "name": "swiftride-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "swiftride-api", "access.token.claim": "true", "id.token.claim": "false" }
+        },
+        {
+          "name": "role claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": { "claim.name": "role", "multivalued": "true", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "swiftride-postman",
+      "name": "SwiftRide grading and system tests (dev only)",
+      "description": "Password grant for Postman/Newman and automated tests. Disable outside dev/test.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "defaultClientScopes": ["basic", "profile", "email", "roles", "web-origins", "acr"],
+      "protocolMappers": [
+        {
+          "name": "swiftride-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "swiftride-api", "access.token.claim": "true", "id.token.claim": "false" }
+        },
+        {
+          "name": "role claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": { "claim.name": "role", "multivalued": "true", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true" }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "rider.demo@example.com",
+      "email": "rider.demo@example.com",
+      "firstName": "Rider",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_ACCOUNT_PASSWORD:SwiftRide-demo-2026!}", "temporary": false }],
+      "realmRoles": ["Rider"]
+    },
+    {
+      "username": "rider.other@example.com",
+      "email": "rider.other@example.com",
+      "firstName": "Rider",
+      "lastName": "Other",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_ACCOUNT_PASSWORD:SwiftRide-demo-2026!}", "temporary": false }],
+      "realmRoles": ["Rider"]
+    },
+    {
+      "username": "driver.demo@example.com",
+      "email": "driver.demo@example.com",
+      "firstName": "Driver",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_ACCOUNT_PASSWORD:SwiftRide-demo-2026!}", "temporary": false }],
+      "realmRoles": ["Driver"]
+    },
+    {
+      "username": "driver.other@example.com",
+      "email": "driver.other@example.com",
+      "firstName": "Driver",
+      "lastName": "Other",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_ACCOUNT_PASSWORD:SwiftRide-demo-2026!}", "temporary": false }],
+      "realmRoles": ["Driver"]
+    },
+    {
+      "username": "admin.demo@example.com",
+      "email": "admin.demo@example.com",
+      "firstName": "Admin",
+      "lastName": "Demo",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "${DEV_ACCOUNT_PASSWORD:SwiftRide-demo-2026!}", "temporary": false }],
+      "realmRoles": ["Admin"]
+    }
+  ]
+}

@@ -39,17 +39,26 @@ function execute(prefix, body, { code = 200, values = {}, now = 1000, event = 't
     vm.runInNewContext(script, { pm, atob, btoa, Date: { now: () => now } });
     return { state, failures, next, name: item.name };
 }
-test('Collection has unique names, Gateway-only URLs, no persisted tokens and valid script syntax', () => {
+test('Collection has unique names, Gateway or Keycloak URLs, no persisted tokens and valid script syntax', () => {
     assert.equal(requests.length, 73);
     assert.equal(new Set(requests.map(item => item.name)).size, requests.length);
     assert.deepEqual(collection.variable, []);
     for (const item of requests) {
-        assert.ok(item.request.url.startsWith('{{baseUrl}}/'));
+        assert.ok(item.request.url.startsWith('{{baseUrl}}/') || item.request.url.startsWith('{{keycloakUrl}}/realms/{{realm}}/'));
+        assert.ok(!item.request.url.startsWith('{{baseUrl}}/auth/'), 'Gateway no longer issues tokens');
         assert.notEqual(item.request.url, '{{baseUrl}}/api/payments');
         for (const entry of item.event) new vm.Script(entry.script.exec.join('\n'));
-        if (item.request.body) JSON.parse(item.request.body.raw);
+        if (item.request.body?.mode === 'raw') JSON.parse(item.request.body.raw);
+        if (item.request.body?.mode === 'urlencoded') assert.ok(item.request.body.urlencoded.every(field => field.key && field.value));
     }
     assert.ok(!environment.values.some(entry => /token|tripId|paymentId/i.test(entry.key)));
+    assert.equal(config.clientId, 'swiftride-postman');
+    const tokenRequests = requests.filter(item => item.request.url.endsWith('/protocol/openid-connect/token'));
+    for (const item of tokenRequests) {
+        const fields = Object.fromEntries(item.request.body.urlencoded.map(field => [field.key, field.value]));
+        assert.ok(['password', 'refresh_token'].includes(fields.grant_type));
+        assert.ok(['{{clientId}}', 'swiftride-mobile'].includes(fields.client_id));
+    }
 });
 test('Readiness resets runtime state and creates a fresh run ID', () => {
     const result = execute('00 ', {}, { event: 'prerequest', values: { riderToken: 'old', tripId: 'old' } });
@@ -58,7 +67,7 @@ test('Readiness resets runtime state and creates a fresh run ID', () => {
     assert.ok(result.state.get('runId'));
 });
 test('Login captures tokens only on successful response', () => {
-    const valid = execute('04 ', { accessToken: 'token', refreshToken: 'refresh' });
+    const valid = execute('04 ', { access_token: 'token', refresh_token: 'refresh', token_type: 'Bearer' });
     assert.equal(valid.state.get('riderToken'), 'token');
     assert.deepEqual(valid.failures, []);
     const invalid = execute('04 ', {}, { code: 401 });
@@ -131,7 +140,7 @@ test('Forged tokens keep the real signature or drop it, never re-sign', () => {
     assert.equal(expired[2], signature);
 });
 test('Admin login stores Admin session only', () => {
-    const result = execute('08 ', { accessToken: 'admin', refreshToken: 'admin-refresh' });
+    const result = execute('08 ', { access_token: 'admin', refresh_token: 'admin-refresh', token_type: 'Bearer' });
     assert.equal(result.state.get('adminToken'), 'admin');
     assert.equal(result.state.get('adminRefresh'), 'admin-refresh');
     assert.equal(result.state.has('driverToken'), false);
@@ -159,4 +168,17 @@ test('Reassigned Trip must still be unassigned and waiting', () => {
     const accepted = execute('57 ', { status: 'DriverAccepted', driverId: 'driver' });
     assert.equal(accepted.next, null);
     assert.equal(accepted.failures.length, 1);
+});
+test('Identity comes from Keycloak userinfo; Rider token must not carry Driver/Admin roles', () => {
+    const rider = execute('10 ', { sub: 'rider-sub', role: ['Rider'] });
+    assert.deepEqual(rider.failures, []);
+    assert.equal(rider.state.get('riderId'), 'rider-sub');
+    const escalated = execute('10 ', { sub: 'rider-sub', role: ['Rider', 'Admin'] });
+    assert.equal(escalated.next, null);
+    assert.equal(escalated.failures.length, 1);
+    assert.equal(execute('11 ', { sub: 'driver-sub', role: ['Driver'] }).state.get('driverId'), 'driver-sub');
+});
+test('Revoked Keycloak refresh token must fail with invalid_grant', () => {
+    assert.deepEqual(execute('67 ', { error: 'invalid_grant' }, { code: 400 }).failures, []);
+    assert.equal(execute('67 ', { access_token: 'x' }, { code: 200 }).next, null);
 });

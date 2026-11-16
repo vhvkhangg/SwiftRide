@@ -1,40 +1,39 @@
 # Test Gateway trên Docker
 
-Dùng duy nhất docker-compose.yml cho toàn bộ backend. Cần Docker Desktop chạy Linux containers.
+Dùng duy nhất docker-compose.yml cho toàn bộ backend, gồm cả Keycloak. Cần Docker Desktop chạy Linux containers.
 
-1. Copy .env.example thành .env.
-2. Điền AUTH_DB_PASSWORD và JWT_SECRET_KEY. Có thể sinh key trong PowerShell 7:
-   [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(64))
-3. Đặt SERVICE_AUTH_SECRET_KEY khác JWT_SECRET_KEY (Compose có fallback local chỉ dành test).
-4. Chạy từ thư mục gốc repository (ví dụ E:/SwiftRide):
+1. (Tùy chọn) Copy .env.example thành .env để đổi `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_DB_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, `SERVICE_AUTH_SECRET_KEY`, `DEV_ACCOUNT_PASSWORD`. Compose có giá trị mặc định chỉ dành cho test local.
+2. Chạy từ thư mục gốc repository (ví dụ E:/SwiftRide):
 
 ~~~powershell
 docker compose up --build -d
-docker compose logs -f api-gateway
+docker compose logs -f keycloak api-gateway
 ~~~
 
-Chờ các service khởi động/migrate xong:
+Keycloak import realm `swiftride` lần đầu khởi động (khoảng 20–40 giây). Gateway chỉ báo ready khi đọc được discovery của Keycloak:
 
 ~~~powershell
-Invoke-RestMethod http://localhost:5100/health
+Invoke-RestMethod http://localhost:5100/health/ready
 pwsh -File tests/Gateway.Security/gateway-security.ps1
 ~~~
 
-Tài khoản demo:
-- rider.demo@example.com
-- driver.demo@example.com
-- driver.other@example.com
-- admin.demo@example.com (Admin, dùng cho refund trong Postman)
+Tài khoản demo (realm import):
+- rider.demo@example.com, rider.other@example.com — Rider
+- driver.demo@example.com, driver.other@example.com — Driver
+- admin.demo@example.com — Admin (refund)
 
-Mật khẩu mặc định: SwiftRide-demo-2026!; override bằng DEV_ACCOUNT_PASSWORD và tham số -SeedPassword của test. Seed chỉ tạo user chưa tồn tại, không reset tài khoản cũ.
+Mật khẩu mặc định: SwiftRide-demo-2026!; override bằng DEV_ACCOUNT_PASSWORD (chỉ áp dụng khi realm được import lần đầu) và tham số -SeedPassword của test.
 
-Test rotation/logout riêng (chờ ít nhất một phút sau suite trước để không vượt auth rate limit):
+Lấy token thủ công (client test `swiftride-postman`, chỉ dev):
 
 ~~~powershell
-pwsh -File tests/ApiGateway.Smoke/auth-smoke.ps1
+$token = (Invoke-RestMethod http://localhost:8180/realms/swiftride/protocol/openid-connect/token -Method Post `
+  -ContentType application/x-www-form-urlencoded `
+  -Body @{grant_type='password'; client_id='swiftride-postman'; username='rider.demo@example.com'; password='SwiftRide-demo-2026!'}).access_token
+Invoke-RestMethod http://localhost:5100/api/trips/active -Headers @{Authorization="Bearer $token"}
 ~~~
 
-AuthDb: localhost:5435, database swiftride_auth, username swiftride, password theo AUTH_DB_PASSWORD. JWT và service keys không dùng lại ở production.
+Keycloak Admin Console: http://localhost:8180/admin (KEYCLOAK_ADMIN_USER / KEYCLOAK_ADMIN_PASSWORD, mặc định admin / keycloak-admin-dev). Dùng để cấp vai trò Driver/Admin.
 
 Dừng containers và giữ dữ liệu:
 
@@ -42,6 +41,8 @@ Dừng containers và giữ dữ liệu:
 docker compose down
 ~~~
 
-Không chạy down -v nếu muốn giữ dữ liệu. Trip/Payment dùng migrations, Auth dùng EnsureCreated cho database mới; không cần xóa toàn bộ database để thêm bảng invitation.
+Không chạy down -v nếu muốn giữ dữ liệu. Muốn import lại realm sau khi sửa `keycloak/swiftride-realm.json` trên máy dev, chỉ xóa volume `keycloak-postgres-data` (mất user tự đăng ký và phiên đăng nhập), không xóa volume Trip/Payment/Mongo.
+
+Volume `auth-postgres-data` của phiên bản cũ (Gateway tự cấp JWT) không còn được dùng; có thể giữ để tham khảo hoặc tự xóa khi chắc chắn không cần.
 
 Routes và thiết kế quyền chi tiết ở gateway-auth.md. Products/Orders là route mẫu, chưa có service triển khai.

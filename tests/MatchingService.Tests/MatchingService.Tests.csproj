@@ -17,4 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/MatchingService/MatchingService.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/TestOidcIssuer.cs" Link="Shared/TestOidcIssuer.cs" />
+  </ItemGroup>
 </Project>

@@ -1,12 +1,6 @@
-using System.Text;
-using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using SwiftRide.ApiGateway.Auth;
-using SwiftRide.ApiGateway.Data;
 using SwiftRide.ApiGateway.Proxy;
+using SwiftRide.Security;
 using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 
@@ -14,27 +8,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("ocelot.json", optional: false, reloadOnChange: false).AddEnvironmentVariables();
 
 builder.Services.AddProblemDetails();
-builder.Services.AddControllers();
-builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddOptions<JwtSettings>()
-    .BindConfiguration("JwtSettings")
-    .ValidateDataAnnotations()
-    .Validate(x => Encoding.UTF8.GetByteCount(x.SecretKey) >= 32, "JWT key must contain at least 32 UTF-8 bytes.")
-    .ValidateOnStart();
-builder.Services.AddSingleton<TokenService>();
-builder.Services.AddSingleton<DummyPasswordHash>();
-builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
-builder.Services.Configure<PasswordHasherOptions>(x => x.IterationCount = 210_000);
-builder.Services.AddDbContext<AuthDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("AuthDb")
-        ?? throw new InvalidOperationException("ConnectionStrings:AuthDb is required.")));
-
+builder.Services.AddHttpClient("keycloak", client => client.Timeout = TimeSpan.FromSeconds(5));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
 builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-    .Configure<TokenService>((options, tokens) =>
+    .Configure(options =>
     {
-        options.MapInboundClaims = false;
-        options.TokenValidationParameters = tokens.ValidationParameters;
+        // Keycloak is the only token issuer; Gateway validates before proxying, services validate again.
+        KeycloakTokens.Configure(options, builder.Configuration);
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -53,71 +33,37 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             }
         };
     });
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("authenticated", policy => policy.RequireAuthenticatedUser()
-        .RequireClaim("sub").RequireClaim("email"));
-});
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
-            AutoReplenishment = true
-        }));
-});
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddOcelot(builder.Configuration)
     .AddDelegatingHandler<IdentityHeaders>(global: true);
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
-app.MapWhen(context => context.Request.Path.StartsWithSegments("/auth") ||
-    context.Request.Path.StartsWithSegments("/health"), local =>
+app.MapWhen(context => context.Request.Path.StartsWithSegments("/health"), local =>
 {
     local.UseRouting();
-    local.UseAuthentication();
-    local.UseAuthorization();
-    local.UseRateLimiter();
     local.UseEndpoints(endpoints =>
     {
-        endpoints.MapControllers();
-        endpoints.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "ok" }))
-            .AllowAnonymous();
-        endpoints.MapGet("/health/ready", async (AuthDbContext db, CancellationToken ct) =>
+        endpoints.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "ok" }));
+        // Ready only when Keycloak discovery (issuer + JWKS location) is reachable.
+        endpoints.MapGet("/health/ready", async (IHttpClientFactory clients, IConfiguration config, CancellationToken ct) =>
         {
+            var metadata = config["Authentication:MetadataAddress"]
+                ?? config["Authentication:Authority"]!.TrimEnd('/') + "/.well-known/openid-configuration";
             try
             {
-                await db.Users.AsNoTracking().Select(user => user.Id).Take(1).ToListAsync(ct);
-                await db.RefreshTokens.AsNoTracking().Select(token => token.Id).Take(1).ToListAsync(ct);
-                return Results.Ok(new { service = "api-gateway", status = "ready" });
+                using var response = await clients.CreateClient("keycloak").GetAsync(metadata, ct);
+                return response.IsSuccessStatusCode
+                    ? Results.Ok(new { service = "api-gateway", status = "ready" })
+                    : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
-        }).AllowAnonymous();
+        });
     });
 });
-if (builder.Configuration.GetValue<bool>("AuthDatabase:Migrate") &&
-    builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
-    throw new InvalidOperationException("AuthDatabase:Migrate and EnsureCreated cannot both be enabled.");
-if (builder.Configuration.GetValue<bool>("AuthDatabase:Migrate"))
-{
-    await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
-}
-
-if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("AuthDatabase:EnsureCreated"))
-{
-    await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
-}
-if (app.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("DevelopmentAccounts:Enabled"))
-    await DevelopmentAccounts.SeedAsync(app.Services, builder.Configuration);
 app.UseWebSockets();
 app.UseAuthentication();
 app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"), hub =>

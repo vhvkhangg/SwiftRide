@@ -4,27 +4,30 @@ Base URL: Gateway, local `http://localhost:5100`. Thiet bi that dung IP LAN cua 
 
 Tai lieu mo ta code hien tai, khong coi API du kien la da co. HTTP/SignalR transport da duoc test qua Gateway that voi Trip test host; nghiep vu DB/broker that van can smoke full-stack.
 
-## Authentication
+## Authentication (Keycloak OIDC)
 
-Moi business HTTP request gui `Authorization: Bearer <accessToken>`. Khong gui token qua query string cho HTTP API. Khong dung X-User-* lam danh tinh.
+Token do Keycloak cap (realm `swiftride`, issuer `{KEYCLOAK_PUBLIC_URL}/realms/swiftride`, local `http://localhost:8180/realms/swiftride`). Gateway khong con /auth/*. Moi business HTTP request gui `Authorization: Bearer <access_token>`. Khong gui token qua query string cho HTTP API. Khong dung X-User-* lam danh tinh.
 
-| Endpoint | Body | Thanh cong |
+App dung client public `swiftride-mobile` voi **Authorization Code + PKCE (S256)**, mo trang dang nhap/dang ky cua Keycloak trong trinh duyet he thong. Redirect URI hop le: `swiftride-rider://*`, `swiftride-driver://*`, `exp://*` (Expo Go), `http://localhost:8081/*` (web preview). Client nay khong cho password grant.
+
+| Viec | Endpoint (goc `/realms/swiftride/protocol/openid-connect`) | Ket qua |
 |---|---|---|
-| POST /auth/register | email, password | 201: id, email; luon tao Rider |
-| POST /auth/login | email, password | 200: accessToken, refreshToken, accessTokenExpiresAtUtc |
-| GET /auth/me | Khong body; Bearer token | 200: id, email, roles[] |
-| POST /auth/refresh-token | refreshToken | 200: cap token moi |
-| POST /auth/revoke | refreshToken | 204 |
+| Dang nhap | GET /auth?client_id=swiftride-mobile&response_type=code&scope=openid&code_challenge=…&code_challenge_method=S256&redirect_uri=… | Redirect ve app kem `code` |
+| Dang ky | GET /registrations (cung tham so) | Tao user moi, luon chi co role Rider |
+| Doi code lay token | POST /token: grant_type=authorization_code, client_id, code, code_verifier, redirect_uri | 200: access_token, refresh_token, expires_in |
+| Lam moi token | POST /token: grant_type=refresh_token, client_id, refresh_token | 200: cap token moi; refresh token cu het hieu luc |
+| Danh tinh | GET /userinfo + Bearer | 200: sub, email, role[] |
+| Dang xuat | POST /logout: client_id, refresh_token | 204 |
 
-Password 12-128 ky tu. Email trung: 409. Dang nhap sai/refresh khong hop le: 401. Rate limit Auth: 20 requests/phut/IP/process, vuot nguong: 429.
+Access token song 15 phut. Chi cho mot refresh request chay tai mot thoi diem va thay ca cap token; refresh token cu bi tu choi (400 invalid_grant). Logout dong SignalR va xoa token tren client; access token da cap van co the hop le den expiry.
 
-Chi cho mot refresh request chay tai mot thoi diem. Thay ca cap token sau refresh; khong retry bang refresh token cu. Replay token cu thu hoi family. Logout dong SignalR va xoa token tren client; access token da cap van co the hop le den expiry.
+Driver/Admin chi duoc cap trong Keycloak Admin Console; dang ky cong khai khong tu cap Driver/Admin. Demo development: rider.demo@example.com, rider.other@example.com, driver.demo@example.com, driver.other@example.com, admin.demo@example.com.
 
-Driver duoc provision boi backend/admin; public register khong tu cap Driver/Admin. Demo development: rider.demo@example.com, driver.demo@example.com, driver.other@example.com.
+Trang thai app hien tai: man hinh dang nhap trong `mobile/` van la ban demo noi bo, chua noi Keycloak; client `swiftride-mobile` da san sang trong realm.
 
 ## Rider flow
 
-1. GET /auth/me, xac nhan role Rider.
+1. GET /userinfo cua Keycloak (hoac doc claim `role` trong token), xac nhan role Rider.
 2. POST /api/matching/quote de hien gia tham khao. Body: distance (km), estimatedTime (phut), rideType, promoCode (optional). Response: base, distance, time, surge, toll, discount, tax, total.
 3. POST /api/trips/ de tao chuyen va lay gia do Trip goi Pricing noi bo. Khong gui fareEstimate; RiderId trong body bi ghi de boi JWT.
 4. Hien gia `fareEstimate` tu chuyen vua tao; Rider dong y thi POST /api/trips/{id}/confirm-price, body `{}`, response 202.
@@ -120,8 +123,6 @@ Dang ky listeners truoc khi bat dau thao tac. SignalR khong co durable replay: s
 ```powershell
 dotnet test tests/TripService.Tests --filter FullyQualifiedName~GatewayTransportTests
 pwsh -File tests/Gateway.Security/gateway-security.ps1
-# Cho it nhat mot phut giua hai suite Auth de tranh 429.
-pwsh -File tests/ApiGateway.Smoke/auth-smoke.ps1
 ```
 
 Transport test can PowerShell 7 (`pwsh`), dung process Gateway that, Trip endpoints/hub that, EF InMemory va application service gia. Test cung chay signalr-helpers.ps1 tren WebSocket that. Test nay khong thay the DB/RabbitMQ smoke.
@@ -135,9 +136,7 @@ Chay tu repository root. Docker Engine phai hoat dong. Compose overlay doi ports
 ```powershell
 docker compose -p swiftride-task1-test --env-file .env.example -f docker-compose.yml -f tests/Gateway.Security/compose.test.yml up --build -d
 docker compose -p swiftride-task1-test --env-file .env.example -f docker-compose.yml -f tests/Gateway.Security/compose.test.yml ps
-pwsh -NoProfile -File tests/Gateway.Security/gateway-security.ps1 -BaseUrl http://127.0.0.1:15100 -DirectTripUrl http://127.0.0.1:15101
-Start-Sleep -Seconds 65
-pwsh -NoProfile -File tests/ApiGateway.Smoke/auth-smoke.ps1 -BaseUrl http://127.0.0.1:15100
+pwsh -NoProfile -File tests/Gateway.Security/gateway-security.ps1 -BaseUrl http://127.0.0.1:15100 -KeycloakUrl http://127.0.0.1:18180 -DirectTripUrl http://127.0.0.1:15101
 docker compose -p swiftride-task1-test --env-file .env.example -f docker-compose.yml -f tests/Gateway.Security/compose.test.yml stop
 ```
 

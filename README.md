@@ -10,7 +10,7 @@ Repository scaffold này ưu tiên **luồng cơ bản chạy được trước*
 - **Trip Service** quản lý vòng đời chuyến đi / state machine.
 - **Matching & Pricing Service** tìm tài xế và tính giá.
 - **Payment Service** xử lý thanh toán, ledger/refund và idempotency ở giai đoạn triển khai nghiệp vụ.
-- JWT Bearer dependency được khai báo để triển khai authentication/authorization trong core.
+- **Keycloak** (OAuth 2.0 / OpenID Connect) cấp access token RS256; Gateway và từng service kiểm tra token qua JWKS.
 - Docker Compose cho toàn bộ backend và 3 database logic riêng.
 - xUnit + Moq cho kiểm thử.
 
@@ -26,7 +26,7 @@ Bản React/Vite cũ đã được gỡ bỏ. Chỉ phát triển giao diện tr
 Client (React Native: Rider / Driver; demo chưa nối API)
         |
         v
-API Gateway (Ocelot + JWT)
+API Gateway (Ocelot + JWT từ Keycloak)  <──  Keycloak (realm swiftride)
         |
         +--------------------+--------------------+
         |                    |                    |
@@ -61,7 +61,7 @@ Luồng mục tiêu của bài:
 | Runtime / Framework | .NET 10 LTS / ASP.NET Core |
 | API style | Minimal API hoặc Controllers |
 | API Gateway | Ocelot |
-| Authentication | JWT Bearer; OAuth2/OIDC có thể tích hợp sau |
+| Authentication | Keycloak 26 (OAuth 2.0 / OIDC), JWT Bearer RS256 qua JWKS |
 | Trip data | PostgreSQL + EF Core 10 + Npgsql |
 | Matching/Pricing data | MongoDB + MongoDB.Driver |
 | Payment data | PostgreSQL + EF Core 10 + Npgsql |
@@ -181,6 +181,6 @@ Import the collection and local environment from `postman/`. Run the entire coll
 
 Repository đã có luồng Trip/Matching/Pricing/Payment, reservation và inbox/outbox. Payment hiện mô phỏng ledger, chưa tích hợp PSP/ngân hàng thật. Xem [runbook](docs/messaging.md) và [bằng chứng kiểm thử](docs/task5-results.md).
 
-## Authentication tại Gateway
+## Authentication với Keycloak
 
-API Gateway đã tích hợp Auth trực tiếp với PostgreSQL, JWT, refresh token rotation/replay detection và Ocelot identity headers. Toàn bộ solution dùng .NET 10; Gateway dùng EF Core 10/Npgsql. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) để cấu hình secrets, chạy database, migrations, endpoints và downstream middleware. Docker Compose có giá trị mặc định để test local; có thể override AUTH_DB_PASSWORD và JWT_SECRET_KEY trong .env. Xem docs/gateway-docker-test.md.
+Keycloak (realm `swiftride`, cấu hình trong `keycloak/swiftride-realm.json`) quản lý user, vai trò Rider/Driver/Admin, đăng nhập, đăng ký và refresh token. App mobile dùng Authorization Code + PKCE (client `swiftride-mobile`); Postman và test tự động dùng client dev-only `swiftride-postman`. Gateway và ba service chỉ kiểm tra token RS256 (issuer, audience `swiftride-api`, chữ ký JWKS, hạn dùng); không còn tự phát JWT hay lưu mật khẩu. Keycloak chạy ở http://localhost:8180. Xem [hướng dẫn Gateway Auth](docs/gateway-auth.md) và [test trên Docker](docs/gateway-docker-test.md).
