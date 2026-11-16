@@ -96,6 +96,8 @@ services:
       <<: *service-security
       ASPNETCORE_URLS: http://+:8080
       Services__MatchingService__BaseUrl: http://matching-service:8080/
+      # Saga thanh toán: hạn chờ kết quả trước khi hủy (Failed) và bù trừ nếu tiền về muộn.
+      TripPayment__TimeoutSeconds: ${TRIP_PAYMENT_TIMEOUT_SECONDS:-600}
       Database__Migrate: "true"
       ConnectionStrings__TripDb: Host=trip-postgres;Port=5432;Database=${TRIP_DB_NAME:-swiftride_trip};Username=${TRIP_DB_USER:-swiftride};Password=${TRIP_DB_PASSWORD:-swiftride_dev}
       RabbitMq__Host: rabbitmq

@@ -41,8 +41,8 @@ flowchart LR
 3. Matching tìm tài xế gần nhất trên MongoDB và giữ chỗ nguyên tử. Trip gửi lời mời cho tài xế qua SignalR.
 4. Tài xế nhận hoặc từ chối. Khi từ chối hoặc hết giờ, hệ thống nhả tài xế và thử người khác, tối đa `k = 3` lần, quá giới hạn thì chuyến thành `Failed`.
 5. Tài xế cập nhật `enroute` → `pickup` → `dropoff`.
-6. Dropoff chuyển chuyến sang `PaymentPending` và ghi `ProcessPaymentV1` vào Outbox trong cùng một transaction.
-7. Payment ghi sổ cái và phát kết quả: chuyến thành `Paid` khi thành công, `Failed` khi bị từ chối; lỗi kỹ thuật thì retry rồi giữ `PaymentPending`.
+6. Dropoff chuyển chuyến sang `PaymentPending` và phát `TripDroppedOffV1` (qua Outbox, cùng transaction). **Saga thanh toán** nhận event và gửi `ProcessPaymentV1`.
+7. Payment ghi sổ cái và phát kết quả: chuyến thành `Paid` khi thành công, `Failed` khi bị từ chối. Quá hạn chờ (mặc định 10 phút) thì saga chuyển chuyến sang `Failed`; nếu tiền về muộn, saga tự gửi lệnh hoàn tiền (bù trừ).
 8. Admin có thể hoàn tiền (`refund`) cho payment đã thành công.
 
 Sơ đồ trạng thái và luồng message chi tiết: [báo cáo, mục 4](docs/architecture-report.md#4-flowchart-vòng-đời-một-chuyến-đi).
@@ -149,7 +149,7 @@ SwiftRide/
 | **Dependency Inversion** | Đăng ký DI trong `Program.cs` của từng service |
 | **Transactional Outbox / Inbox**, Idempotent Consumer | MassTransit EF Outbox ở Trip và Payment |
 | **Factory** | `PaymentMethodFactory` tạo phương thức Wallet / Card trong Payment |
-| **Saga (choreography)** + bù trừ | Nhả tài xế, tìm tài xế khác, payment failed, refund |
+| **Saga (orchestration)** + bù trừ | `TripPaymentStateMachine`: thanh toán sau trả khách, timeout, tự hoàn tiền khi tiền về muộn |
 | **API Gateway** | `src/ApiGateway` |
 
 Giải thích và ví dụ code: [báo cáo, mục 6–7](docs/architecture-report.md#6-áp-dụng-nguyên-tắc-solid).

@@ -36,7 +36,7 @@ Ngoài phần bắt buộc, hệ thống có thêm các phần mở rộng mà �
 - **Identity Provider**: Keycloak (OAuth 2.0 / OpenID Connect).
 - **Message broker**: RabbitMQ qua MassTransit.
 - **Transactional Outbox/Inbox**.
-- **Saga dạng choreography** có hành động bù trừ.
+- **Saga thanh toán dạng orchestration** (MassTransit State Machine) có timeout và hành động bù trừ tự động (hoàn tiền).
 - Cập nhật thời gian thực qua **SignalR**.
 - Chạy toàn bộ bằng **Docker Compose**.
 - Kiểm thử nhiều tầng: unit, integration, system/recovery, Postman.
@@ -276,11 +276,13 @@ sequenceDiagram
         T->>MQ: Publish DriverReservationConfirmedV1
     end
     Driver->>T: enroute, pickup, dropoff
-    T->>MQ: Send ProcessPaymentV1 + ReleaseDriverV1 (cùng transaction dropoff)
+    T->>MQ: Publish TripDroppedOffV1 + Send ReleaseDriverV1 (cùng transaction dropoff)
+    MQ->>T: Saga thanh toán (TripPaymentStateMachine) bắt đầu
+    T->>MQ: Saga Send ProcessPaymentV1
     MQ->>P: ProcessPaymentConsumer (Inbox chống trùng)
     P->>P: Payment + 2 bút toán sổ cái (debit/credit)
     P->>MQ: Publish PaymentSucceededV1 / PaymentFailedV1
-    MQ->>T: PaymentSucceededConsumer, chuyến thành Paid
+    MQ->>T: PaymentSucceededConsumer, chuyến thành Paid; saga thành Completed
     T-->>Rider: SignalR tripChanged
 ```
 
@@ -292,7 +294,7 @@ Ký hiệu quyền: **R** = Rider, **D** = Driver, **A** = Admin, **S** = token 
 
 ### 5.1 Trip Service
 
-**Trách nhiệm:** khởi tạo chuyến, giữ và chuyển trạng thái (State pattern), quản lý lời mời tài xế và thời hạn mời (`DriverInvitationTimeoutWorker`), điều phối Saga, đẩy thông báo SignalR (`TripNotificationHub`).
+**Trách nhiệm:** khởi tạo chuyến, giữ và chuyển trạng thái (State pattern), quản lý lời mời tài xế và thời hạn mời (`DriverInvitationTimeoutWorker`), chạy Saga thanh toán (`TripPaymentStateMachine`), đẩy thông báo SignalR (`TripNotificationHub`).
 
 | Endpoint (qua Gateway `/api`) | Quyền | Mô tả |
 |---|---|---|
@@ -448,7 +450,7 @@ Lợi ích thấy được ngay trong kiểm thử: `TripApplicationServiceTests
 | **Unit of Work** | Enterprise | Gom thay đổi trạng thái và message Outbox vào một transaction | `ITripUnitOfWork` / `TripUnitOfWork` |
 | **Observer / Pub-Sub** | Behavioral | Sự kiện domain qua RabbitMQ; SignalR đẩy `tripChanged`/`driverInvitation` | `SwiftRide.Messaging`, `TripNotificationHub` |
 | **API Gateway** | Architectural | Một điểm vào cho client (YARP) | `src/ApiGateway` |
-| **Saga (choreography)** | Architectural | Quy trình nhiều service với hành động bù trừ (mục 9.2) | Consumers trong Trip/Matching/Payment |
+| **Saga (orchestration)** | Architectural | Điều phối thanh toán sau trả khách: gửi lệnh, theo dõi kết quả, timeout, hoàn tiền bù trừ (mục 9.2) | `src/TripService/Application/Sagas/` (`TripPaymentStateMachine`) |
 | **Transactional Outbox / Inbox** | Architectural | Ghi dữ liệu và message trong cùng transaction; chống xử lý trùng | MassTransit EF Outbox (Trip, Payment), migration `AddTripOutbox`, `AddPaymentConsumerOutbox` |
 | **Idempotent Consumer** | Integration | Message trùng không tạo payment hay ledger thứ hai | `PaymentApplicationService`, unique index idempotency key |
 | **Dependency Injection** | Creational | Gắn cài đặt cụ thể vào abstraction | `Program.cs` của mỗi service |
@@ -555,7 +557,7 @@ Chi phí phải trả cho phân tán, và cách nhóm xử lý:
 
 | Chi phí | Cách SwiftRide xử lý |
 |---|---|
-| Không có transaction xuyên service | Saga choreography + hành động bù trừ |
+| Không có transaction xuyên service | Saga orchestration cho thanh toán, choreography cho tìm tài xế; có hành động bù trừ |
 | Message có thể trùng hoặc đến muộn | Inbox, idempotency key, kiểm tra `Attempt` và trạng thái trước khi áp dụng |
 | Service hoặc broker có thể chết giữa chừng | Outbox; consumer bền vững (durable queue); kịch bản kill/restart được kiểm thử |
 | Vận hành nhiều thành phần | Một file Docker Compose; healthcheck cho CSDL, broker, Keycloak và readiness cho từng service |
@@ -571,14 +573,34 @@ Chi phí phải trả cho phân tán, và cách nhóm xử lý:
   - Lỗi dữ liệu (`ArgumentException`, `PaymentCommandRejectedException`) không retry.
   - Message vẫn lỗi được chuyển sang queue `_error` kèm MessageId gốc, sau đó có thể replay an toàn (`error-fault-replay`).
   - Mọi lời gọi HTTP nội bộ đều có timeout.
-- **Saga dạng choreography:** không có bộ điều phối trung tâm; mỗi service phản ứng với sự kiện:
+- **Saga thanh toán (orchestration):** `TripPaymentStateMachine` (MassTransit State Machine) trong Trip Service điều phối giai đoạn từ trả khách tới khi tiền được chốt. Trạng thái saga lưu ở bảng `TripPaymentSagas` trong TripDB (khóa lạc quan bằng `xmin`), dùng chung DbContext và Outbox với Trip, nên đổi trạng thái saga và gửi lệnh nằm trong một transaction. Saga là nơi **duy nhất** gửi `ProcessPaymentV1` và lệnh bù trừ `RefundPaymentV1`; consumer của Trip vẫn là nơi đổi trạng thái chuyến khi có kết quả.
+
+```mermaid
+stateDiagram-v2
+    [*] --> AwaitingPayment: TripDroppedOffV1, gửi ProcessPaymentV1
+    AwaitingPayment --> AwaitingPayment: dropoff lặp lại (gửi lại cùng key) / Fault (đếm lỗi)
+    AwaitingPayment --> Completed: PaymentSucceededV1
+    AwaitingPayment --> Declined: PaymentFailedV1
+    AwaitingPayment --> Abandoned: quá hạn, Trip chuyển Failed (PAYMENT_TIMEOUT)
+    AwaitingPayment --> Completed: quá hạn nhưng Trip đã kịp Paid
+    Abandoned --> Compensating: PaymentSucceededV1 đến muộn, gửi RefundPaymentV1
+    Compensating --> Refunded: PaymentRefundedV1
+    Completed --> [*]
+    Declined --> [*]
+    Refunded --> [*]
+```
+
+  - **Timeout:** `PaymentSagaTimeoutWorker` quét saga quá hạn (`TripPayment:TimeoutSeconds`, mặc định 600 giây; Compose: `TRIP_PAYMENT_TIMEOUT_SECONDS`) và phát `TripPaymentTimedOutV1`. Activity `AbandonTripPaymentActivity` chuyển chuyến còn `PaymentPending` sang `Failed`. Lệnh thanh toán đến muộn sau đó bị Payment từ chối (chuyến không còn chờ thanh toán) và nằm ở `_error` cho người vận hành, nên **không có khoản thu cho chuyến đã thất bại**. Dùng worker thay cho bộ lập lịch message vì RabbitMQ chưa bật plugin delayed exchange.
+  - **Bù trừ:** nếu Payment đã kịp trừ tiền khi chuyến còn chờ nhưng kết quả đến sau khi saga quá hạn, saga gửi `RefundPaymentV1`; `RefundPaymentConsumer` hoàn tiền (idempotent, ghi hai bút toán đảo ngược) và phát `PaymentRefundedV1`.
+  - **Message trùng/muộn:** event không thuộc trạng thái hiện tại bị bỏ qua (`OnUnhandledEvent → Ignore`); kết quả cho chuyến không có saga bị loại (`OnMissingInstance → Discard`).
+  - **Quan sát:** `GET /api/trips/{id}/payment-saga` trả trạng thái saga, hạn chót, số lệnh đã gửi, số lỗi kỹ thuật, lý do.
+
+- **Choreography cho giai đoạn tìm tài xế:** các bước còn lại phối hợp qua event, kèm bù trừ:
 
 | Bước | Hành động | Hành động bù trừ khi thất bại |
 |---|---|---|
 | Giữ chỗ tài xế (Matching) | `FindDriverForTripV1` giữ chỗ nguyên tử | `ReleaseDriverV1` khi tài xế từ chối hoặc hết giờ, rider hủy, hoặc sau dropoff; `ReservationRecoveryWorker` nhả các chỗ giữ mồ côi |
 | Mời tài xế (Trip) | Tạo `DriverInvitation` | Đóng lời mời, tăng lượt thử, tìm tài xế khác; vượt k thì `Failed` |
-| Thanh toán (Payment) | `ProcessPaymentV1` ghi ledger | Bị từ chối thì `PaymentFailedV1` và chuyến `Failed`; lỗi kỹ thuật giữ `PaymentPending` để replay |
-| Sau khi đã thanh toán | — | **Refund** (Admin) ghi hai bút toán đảo ngược, chặn refund lần hai |
 
 Saga không thay thế transaction nội bộ hay Outbox; nó được xây **trên** hai cơ chế đó.
 

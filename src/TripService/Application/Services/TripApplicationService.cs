@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using SwiftRide.Contracts.Matching;
 using SwiftRide.Contracts.Payments;
+using SwiftRide.Contracts.Trips;
 using SwiftRide.Messaging;
 using SwiftRide.TripService.Application.DTOs;
 using SwiftRide.TripService.Application.Interfaces;
@@ -346,7 +347,8 @@ public sealed class TripApplicationService : ITripApplicationService
                 throw new InvalidOperationException("Chuyến chưa ở trạng thái có thể thanh toán.");
             }
 
-            var payment = new ProcessPaymentV1
+            // Saga thanh toán (TripPaymentStateMachine) nhận event này và gửi ProcessPaymentV1.
+            var droppedOff = new TripDroppedOffV1
             {
                 CorrelationId = trip.Id,
                 TripId = trip.Id,
@@ -362,7 +364,7 @@ public sealed class TripApplicationService : ITripApplicationService
 
             try
             {
-                await _messageBus.SendPaymentAsync(payment, transactionCt);
+                await _messageBus.PublishAsync(droppedOff, transactionCt);
                 await _messageBus.ReleaseDriverAsync(
                     trip.DriverId.Value,
                     trip.Id,
@@ -498,6 +500,18 @@ public sealed class TripApplicationService : ITripApplicationService
         trip.MarkFailed();
         await SaveAndNotifyAsync(trip, ct);
         await ReleaseTripReservationsAsync(trip, "payment-failed", ct);
+    }
+
+    public async Task<bool> AbandonPaymentAsync(Guid tripId, string reason, CancellationToken ct = default)
+    {
+        var trip = await GetTripAsync(tripId, ct);
+        if (trip.Status == TripStatus.Paid) return true;
+        if (trip.Status != TripStatus.PaymentPending) return false;
+
+        trip.RecordPaymentFailure(reason);
+        trip.MarkFailed();
+        await SaveAndNotifyAsync(trip, ct);
+        return false;
     }
 
     public async Task HandlePaymentFaultAsync(ProcessPaymentV1 command, CancellationToken ct = default)

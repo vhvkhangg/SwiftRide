@@ -1,3 +1,4 @@
+using SwiftRide.TripService.Application.Sagas;
 using MassTransit;
 using SwiftRide.Security;
 using SwiftRide.Messaging;
@@ -26,6 +27,15 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentFailed);
     consumers.AddConsumer<PaymentFaultConsumer>()
         .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentFault);
+    // Saga thanh toán (orchestration): trạng thái lưu trong TripDB, cùng DbContext/Outbox với Trip.
+    consumers.AddSagaStateMachine<TripPaymentStateMachine, TripPaymentSagaState>()
+        .EntityFrameworkRepository(repository =>
+        {
+            repository.ConcurrencyMode = ConcurrencyMode.Optimistic;
+            repository.ExistingDbContext<TripDbContext>();
+            repository.UsePostgres();
+        })
+        .Endpoint(endpoint => endpoint.Name = MessagingEndpoints.TripPaymentSaga);
     consumers.AddEntityFrameworkOutbox<TripDbContext>(options =>
     {
         options.UsePostgres();
@@ -37,7 +47,8 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
         if (name is MessagingEndpoints.TripDriverFoundForTrip or
             MessagingEndpoints.TripNoDriverFoundForTrip or
             MessagingEndpoints.TripPaymentSucceeded or
-            MessagingEndpoints.TripPaymentFailed or MessagingEndpoints.TripPaymentFault)
+            MessagingEndpoints.TripPaymentFailed or MessagingEndpoints.TripPaymentFault or
+            MessagingEndpoints.TripPaymentSaga)
         {
             endpoint.UseEntityFrameworkOutbox<TripDbContext>(context);
         }
@@ -45,6 +56,9 @@ builder.Services.AddSwiftRideMessaging(builder.Configuration, "trip", consumers 
 });
 
 builder.Services.AddServiceSecurity(builder.Configuration);
+builder.Services.Configure<TripPaymentSagaOptions>(builder.Configuration.GetSection("TripPayment"));
+builder.Services.AddScoped<AbandonTripPaymentActivity>();
+builder.Services.AddHostedService<PaymentSagaTimeoutWorker>();
 builder.Services.AddSignalR();
 builder.Services.Configure<TripMatchingOptions>(builder.Configuration.GetSection("TripMatching"));
 builder.Services.AddHttpContextAccessor();

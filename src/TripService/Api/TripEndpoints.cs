@@ -1,3 +1,4 @@
+using SwiftRide.TripService.Application.Sagas;
 using Microsoft.EntityFrameworkCore;
 using SwiftRide.Security;
 using SwiftRide.TripService.Application.DTOs;
@@ -53,6 +54,26 @@ public static class TripEndpoints
         // API Lấy thông tin chuyến đi
         group.MapGet("/{id:guid}", async (Guid id, ITripApplicationService service, CancellationToken ct) =>
             Results.Ok(await service.GetByIdAsync(id, ct)));
+        // Tiến trình Saga thanh toán của chuyến (để quan sát/demo); quyền giống xem chi tiết chuyến.
+        group.MapGet("/{id:guid}/payment-saga", async (Guid id, TripDbContext db, CancellationToken ct) =>
+        {
+            var saga = await db.Set<TripPaymentSagaState>().AsNoTracking()
+                .SingleOrDefaultAsync(x => x.CorrelationId == id, ct);
+            return saga is null ? Results.NotFound() : Results.Ok(new
+            {
+                tripId = saga.CorrelationId,
+                state = saga.CurrentState,
+                saga.Amount,
+                saga.PaymentMethod,
+                saga.PaymentId,
+                saga.CommandsSent,
+                saga.FaultCount,
+                saga.FailureReason,
+                saga.StartedAtUtc,
+                saga.DeadlineUtc,
+                saga.CompletedAtUtc
+            });
+        });
         group.MapPost("/{id:guid}/confirm-price", async (
             Guid id, ITripApplicationService service, ILogger<TripApplicationService> logger, CancellationToken ct) =>
         {

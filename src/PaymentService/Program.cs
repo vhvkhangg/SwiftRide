@@ -32,6 +32,10 @@ builder.Services.AddSwiftRideMessaging(
                 e.Name = MessagingEndpoints.PaymentProcessPayment;
             });
 
+        // Lệnh bù trừ (hoàn tiền) do Saga thanh toán bên Trip gửi.
+        x.AddConsumer<RefundPaymentConsumer>()
+            .Endpoint(e => e.Name = MessagingEndpoints.PaymentRefundPayment);
+
         x.AddEntityFrameworkOutbox<PaymentDbContext>(o =>
         {
             o.UsePostgres();
@@ -41,7 +45,7 @@ builder.Services.AddSwiftRideMessaging(
 
         x.AddConfigureEndpointsCallback((context, name, endpoint) =>
         {
-            if (name == MessagingEndpoints.PaymentProcessPayment)
+            if (name is MessagingEndpoints.PaymentProcessPayment or MessagingEndpoints.PaymentRefundPayment)
             {
                 endpoint.UseEntityFrameworkOutbox<PaymentDbContext>(
                     context);
