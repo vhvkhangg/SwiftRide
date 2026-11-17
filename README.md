@@ -191,7 +191,7 @@ Giải thích và ví dụ code: [báo cáo, mục 6–7](docs/architecture-repo
 
 - Payment là ledger mô phỏng, chưa tích hợp cổng thanh toán thật.
 - Chưa có OpenTelemetry; hệ thống hiện chỉ có log có cấu trúc và health check.
-- App mobile cập nhật trạng thái bằng cách hỏi lại mỗi 2 giây, chưa dùng SignalR; bản đồ là minh họa với 4 địa điểm mẫu.
+- App mobile cập nhật trạng thái bằng cách hỏi lại mỗi 2 giây, chưa dùng SignalR; vị trí tài xế là GPS giả lập chọn trên bản đồ OpenStreetMap.
 - Phí phụ (toll) đang bằng 0 và loại xe chưa ảnh hưởng tới giá.
 
 Hướng phát triển: [báo cáo, mục 11](docs/architecture-report.md#11-hạn-chế-và-hướng-phát-triển).

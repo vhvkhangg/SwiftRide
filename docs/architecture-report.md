@@ -680,7 +680,7 @@ Hướng dẫn chạy: [README.md](../README.md), [postman/README.md](../postman
 | Chưa có OpenTelemetry (trace/metric phân tán) | Thêm OpenTelemetry SDK cho ASP.NET Core, HttpClient, MassTransit; xuất ra Jaeger/Prometheus; theo dõi tỉ lệ đặt xe thành công, thời gian matching, tỉ lệ thanh toán lỗi, độ dài hàng đợi |
 | Thanh toán là ledger mô phỏng | Tích hợp cổng thanh toán (chỉ lưu token do cổng cấp), thay `CardPaymentMethod` mô phỏng bằng adapter tới cổng thật; cho rider chọn phương thức trong app |
 | Phí phụ (toll) = 0, `RideType` chưa ảnh hưởng giá | Lấy dữ liệu trạm thu phí, thêm hệ số theo loại xe (thêm Strategy mới, không sửa lớp cũ) |
-| App mobile cập nhật trạng thái bằng polling 2 giây, bản đồ minh họa 4 địa điểm | Nối SignalR `tripChanged`/`driverInvitation` để nhận sự kiện tức thì; thêm GPS và bản đồ thật |
+| App mobile cập nhật trạng thái bằng polling 2 giây; GPS tài xế giả lập | Nối SignalR `tripChanged`/`driverInvitation` để nhận sự kiện tức thì; đọc GPS thiết bị (`expo-location`) và gửi vị trí liên tục |
 | Token nội bộ giữa service dùng khóa chung HS256 | Chuyển sang Keycloak client credentials (mỗi service một confidential client) |
 | Keycloak chạy `start-dev`, HTTP | Production: `start` sau HTTPS, tắt client `swiftride-postman`, không import user demo |
-| Quãng đường và thời gian do client gửi lên | Tính lại phía server bằng dịch vụ bản đồ trước khi dùng tiền thật |
+| Quãng đường và thời gian do client gửi lên (app lấy từ OSRM) | Trip/Pricing tự gọi dịch vụ định tuyến từ tọa độ đón/đến (đã lưu trong Trip) trước khi dùng tiền thật; dùng máy chủ OSRM/Nominatim riêng thay cho máy chủ demo công cộng |

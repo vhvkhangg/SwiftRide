@@ -41,12 +41,13 @@ Trên điện thoại thật, `localhost` là chính điện thoại: dùng IP L
 | | |
 |---|---|
 | Đăng nhập | Keycloak, client `swiftride-mobile`, Authorization Code + PKCE (S256). Web: chuyển hướng cả trang sang Keycloak rồi quay lại (không dùng popup vì trình duyệt điện thoại hay chặn); native: trình duyệt hệ thống. App không nhận mật khẩu. Token chỉ giữ trong bộ nhớ, tự refresh trước khi hết hạn (một request refresh tại một thời điểm). Đăng xuất thu hồi refresh token và thoát phiên SSO. App Rider chỉ nhận tài khoản có role Rider, app Driver chỉ nhận Driver. |
-| Rider | Chọn điểm đón/đến → `POST /api/matching/quote` (bảng giá: cước theo km, theo phút, phụ thu cao điểm, phí phụ, giảm giá, VAT) → `POST /api/trips/` (kèm `idempotencyKey`) → `POST /confirm-price` → theo dõi trạng thái, số tài xế đã từ chối / ngưỡng k → Saga thanh toán (`GET /api/trips/{id}/payment-saga`) → kết quả. Hủy được khi trạng thái cho phép. |
-| Driver | Bật nhận chuyến và chọn vị trí giả lập → `POST /api/drivers/location` (gửi lại mỗi 60 giây để không quá TTL vị trí) → lời mời có đếm ngược → nhận / từ chối → đi đón → đã đón → đã trả khách → xem Saga thanh toán. |
+| Bản đồ | Bản đồ OpenStreetMap thật bằng Leaflet: web dùng gói `leaflet`, native nhúng cùng mã đó trong `react-native-webview` (Leaflet 1.9.4 từ unpkg, có SRI). Chạm bản đồ để chọn điểm; tên địa chỉ lấy từ Nominatim (lỗi hoặc chậm thì hiện tọa độ). Có ô tìm địa chỉ (Nominatim, giới hạn Việt Nam) và 4 địa điểm chọn nhanh. Đường đi, quãng đường và thời gian lấy từ OSRM; OSRM lỗi thì ước tính đường chim bay × 1,3, 22 km/h và báo rõ trên màn hình. |
+| Rider | Chọn điểm đón/đến trên bản đồ → `POST /api/matching/quote` (bảng giá: cước theo km, theo phút, phụ thu cao điểm, phí phụ, giảm giá, VAT) → `POST /api/trips/` (kèm `idempotencyKey` và tọa độ đón/đến) → `POST /confirm-price` → theo dõi trạng thái, số tài xế đã từ chối / ngưỡng k → Saga thanh toán (`GET /api/trips/{id}/payment-saga`) → kết quả. Hủy được khi trạng thái cho phép. |
+| Driver | Bật nhận chuyến, chọn vị trí giả lập bằng cách chạm bản đồ / tìm địa chỉ → `POST /api/drivers/location` (gửi lại mỗi 60 giây để không quá TTL vị trí) → lời mời có đếm ngược, bản đồ hiện tài xế + điểm đón/đến + đường đi → nhận / từ chối → đi đón → đã đón (xe dời tới điểm đón) → đã trả khách (xe dời tới điểm đến) → xem Saga thanh toán. |
 | Khôi phục | Mở lại app: `GET /api/trips/active` lấy chuyến đang chạy. HTTP là nguồn sự thật; app hỏi lại trạng thái mỗi 2 giây (chưa dùng SignalR). |
 | Lỗi | 401/403/409/5xx hiện thông báo; 409 tự tải lại chuyến. Không tự gửi lại POST. |
 
-Quãng đường/thời gian gửi cho Pricing được ước tính từ tọa độ 4 địa điểm mẫu (đường chim bay × 1,3; 22 km/h). Giá hiển thị đúng con số Pricing trả về, không nhân thêm. Bản đồ là SVG minh họa, không có GPS thật, map tiles hay dẫn đường; vị trí tài xế chọn trong 4 địa điểm.
+Giá hiển thị đúng con số Pricing trả về, không nhân thêm. Vị trí tài xế vẫn là GPS giả lập (chọn trên bản đồ), chưa đọc GPS thiết bị và chưa dẫn đường. Dịch vụ OSM công cộng (tile, Nominatim, OSRM demo) chỉ phù hợp cho bài tập/demo: Nominatim giới hạn 1 request/giây, app chỉ gọi khi người dùng chạm hoặc bấm Tìm.
 
 Web preview gọi Gateway khác origin nên Gateway bật CORS cho `http://localhost:8081` và `http://localhost:8082` (`Cors:AllowedOrigins`). Keycloak đã có dữ liệu từ trước cần thêm `http://localhost:8082/*` vào redirect URI của client `swiftride-mobile` (hoặc tạo lại DB Keycloak) để app Driver bản web đăng nhập được.
 
@@ -56,7 +57,8 @@ Web preview gọi Gateway khác origin nên Gateway bật CORS cho `http://local
 mobile/
   apps/rider/       entry Rider, app.json, eas.json, icon
   apps/driver/      entry Driver, app.json, eas.json, icon
-  shared/           khung app, cấu hình, client Gateway, UI dùng chung, 4 địa điểm mẫu
+  shared/           khung app, cấu hình, client Gateway, UI dùng chung, 4 địa điểm chọn nhanh
+  shared/map/       bản đồ Leaflet (LiveMap.web.tsx cho web, LiveMap.tsx qua WebView cho native), Nominatim, OSRM
   shared/api/       đăng nhập Keycloak, màn Rider/Driver gọi Gateway, helper thuần (trip.ts)
   tests/            test Node.js
 ```
@@ -82,6 +84,6 @@ npm run typecheck
 npm test
 ```
 
-Test bao phủ: ánh xạ trạng thái chuyến (giá trị lạ không bao giờ bị coi là đã xong), ước tính quãng đường, hiển thị giá, đọc claim từ token Keycloak, cấu hình URL, client Gateway (giữ body/header, chặn đường dẫn lạ, lỗi HTTP rõ ràng, body rỗng của 202, không tự retry), nút chống bấm lặp và trạng thái bận, bản đồ có nhãn accessibility, và hai app tách biệt định danh. Luồng đầu-cuối được kiểm tra thủ công trên Docker (Rider đặt xe → Driver nhận → đón → trả → Saga Completed; hủy chuyến; đăng xuất).
+Test bao phủ: ánh xạ trạng thái chuyến (giá trị lạ không bao giờ bị coi là đã xong), ước tính quãng đường, đường đi OSRM và dự phòng khi lỗi, rút gọn địa chỉ OSM, tìm địa chỉ, tọa độ chuyến từ server, hiển thị giá, đọc claim từ token Keycloak, cấu hình URL, client Gateway (giữ body/header, chặn đường dẫn lạ, lỗi HTTP rõ ràng, body rỗng của 202, không tự retry), nút chống bấm lặp và trạng thái bận, bản đồ có nhãn accessibility, và hai app tách biệt định danh. Luồng đầu-cuối được kiểm tra thủ công trên Docker (Rider đặt xe → Driver nhận → đón → trả → Saga Completed; hủy chuyến; đăng xuất).
 
 `npm audit` còn báo cảnh báo phụ thuộc gián tiếp của Expo/Metro; không dùng `npm audit fix --force` để hạ Expo/React Native. Không đưa dev server ra Internet.

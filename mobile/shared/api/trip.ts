@@ -24,9 +24,22 @@ export type TripDto = {
   id: string; riderId: string; driverId: string | null; pickupAddress: string; dropoffAddress: string;
   fareEstimate: number | null; status: number | string; createdAt: string; updatedAt: string | null;
   paymentFailureReason?: string | null; declineCount?: number; declineThreshold?: number | null;
+  pickupLatitude?: number | null; pickupLongitude?: number | null; dropoffLatitude?: number | null; dropoffLongitude?: number | null;
 };
 export type QuoteDto = { base: number; distance: number; time: number; surge: number; toll: number; discount: number; tax: number; total: number };
-export type InvitationDto = { id: string; expiresAtUtc: string; pickupAddress: string; dropoffAddress: string; fareEstimate: number | null };
+export type InvitationDto = {
+  id: string; expiresAtUtc: string; pickupAddress: string; dropoffAddress: string; fareEstimate: number | null;
+  pickupLatitude?: number | null; pickupLongitude?: number | null; dropoffLatitude?: number | null; dropoffLongitude?: number | null;
+};
+
+type WithPoints = { pickupLatitude?: number | null; pickupLongitude?: number | null; dropoffLatitude?: number | null; dropoffLongitude?: number | null };
+const latLng = (latitude?: number | null, longitude?: number | null) =>
+  typeof latitude === 'number' && typeof longitude === 'number' && Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null;
+/** Pickup/dropoff points of a trip or invitation; null when the server did not store them (older trips). */
+export const pointsOf = (value: WithPoints) => ({
+  pickup: latLng(value.pickupLatitude, value.pickupLongitude),
+  destination: latLng(value.dropoffLatitude, value.dropoffLongitude),
+});
 export type PaymentDto = { id: string; tripId: string; amount: number; status: string; createdAt: string; updatedAt: string | null };
 
 // Coordinates of the sample places (WGS84). Trip/Matching need pickup coordinates to find drivers.

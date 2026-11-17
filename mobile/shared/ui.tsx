@@ -3,8 +3,7 @@ import type { PropsWithChildren } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { TextProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { findPlace } from './domain';
+import Svg, { Path } from 'react-native-svg';
 
 export const palette = { ink: '#12383D', teal: '#087F8C', dark: '#064D56', muted: '#557078', paper: '#F3F5F0', line: '#DFE8E5', mint: '#E5F3EF', coral: '#BC573E', sand: '#FBF0DA', white: '#FFFFFF' };
 export const font = { regular: 'BeVietnamPro_400Regular', medium: 'BeVietnamPro_500Medium', bold: 'BeVietnamPro_700Bold' };
@@ -82,30 +81,6 @@ export function Sheet({ visible, title, onClose, children }: PropsWithChildren<{
   </Modal>;
 }
 
-const positions: Record<string, [number, number]> = { university: [62, 177], market: [281, 116], postoffice: [307, 53], park: [150, 57] };
-/** Illustrative SVG map with the sample places; not a GPS or tile map. */
-export function CityMap({ pickup, destination = '' }: { pickup: string; destination?: string }) {
-  const from = positions[pickup] ?? positions.university;
-  const to = positions[destination];
-  const pickupName = findPlace(pickup)?.name ?? 'chưa chọn';
-  const destinationName = findPlace(destination)?.name;
-  return <View accessibilityRole="image" accessibilityLabel={`Bản đồ minh họa. Điểm đón ${pickupName}${destinationName ? `, điểm đến ${destinationName}` : ''}.`} style={styles.map}>
-    <Svg width="100%" height={220} viewBox="0 0 360 220" {...(Platform.OS === 'web' ? { 'aria-hidden': true } : { accessible: false })}>
-      <Rect width={360} height={220} fill="#E9EEE5" />
-      {[18, 80, 142, 204, 266, 328].map(horizontal => [15, 76, 137, 198].map(vertical => <Rect key={`${horizontal}-${vertical}`} x={horizontal} y={vertical} width={46} height={42} rx={9} fill="#DFE6DC" />))}
-      <Path d="M342-20C285 45 360 75 336 135S285 170 330 250" fill="none" stroke="#BEDDDC" strokeWidth={37} />
-      <Path d="M-30 201 380 63M105-30 215 260M-20 55H390M-20 120H320" fill="none" stroke="#FAFBF5" strokeWidth={14} />
-      <Rect x={116} y={30} width={62} height={51} rx={18} fill="#BED6BD" />
-      <SvgText x={126} y={49} fontSize={8} fill="#5B7765">CÔNG VIÊN</SvgText><SvgText x={133} y={62} fontSize={8} fill="#5B7765">TAO ĐÀN</SvgText>
-      <SvgText x={9} y={111} fontSize={8} fill="#72837C">TRẦN HƯNG ĐẠO</SvgText><SvgText x={212} y={43} fontSize={8} fill="#72837C">QUẬN 1</SvgText>
-      {to && <Path d={`M${from[0]} ${from[1]} L${from[0]} 145 L${to[0]} 145 L${to[0]} ${to[1]}`} fill="none" stroke={palette.teal} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />}
-      <Circle cx={from[0]} cy={from[1]} r={13} fill="#C5E3DE" /><Circle cx={from[0]} cy={from[1]} r={7} fill={palette.teal} stroke="white" strokeWidth={3} />
-      {to && <Circle cx={to[0]} cy={to[1]} r={9} fill={palette.coral} stroke="white" strokeWidth={3} />}
-    </Svg>
-    <View style={styles.mapLabel}><T style={styles.mapLabelText}>TP. HỒ CHÍ MINH · BẢN ĐỒ MINH HỌA</T></View>
-  </View>;
-}
-
 export const styles = StyleSheet.create({
   text: { fontFamily: font.regular, fontSize: 14, lineHeight: 22, color: palette.ink },
   flex: { flex: 1 }, row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -130,8 +105,6 @@ export const styles = StyleSheet.create({
   sheet: { maxHeight: '90%', width: '100%', maxWidth: 560, backgroundColor: palette.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22 },
   sheetHandle: { width: 38, height: 4, backgroundColor: palette.line, borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 8 },
   sheetBody: { gap: 14, paddingTop: 12, paddingBottom: 16 }, iconButton: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  map: { marginHorizontal: -20, marginBottom: -34, overflow: 'hidden' }, mapLabel: { position: 'absolute', top: 12, left: 20, backgroundColor: '#FFFFFFED', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 7 },
-  mapLabelText: { fontSize: 8, lineHeight: 16, letterSpacing: 1, color: palette.muted },
   input: { minHeight: 54, backgroundColor: '#F6F8F5', borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 15, paddingVertical: 12, fontFamily: font.regular, fontSize: 14, color: palette.ink },
   divider: { height: 1, backgroundColor: palette.line }, center: { alignItems: 'center', gap: 15 },
   heroIcon: { width: 76, height: 76, borderRadius: 28, backgroundColor: palette.mint, alignItems: 'center', justifyContent: 'center', marginVertical: 8 },

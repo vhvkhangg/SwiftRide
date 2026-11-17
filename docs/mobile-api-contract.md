@@ -46,9 +46,13 @@ Body tao chuyen:
   "distance": 2,
   "estimatedTime": 5,
   "rideType": "standard",
-  "promoCode": null
+  "promoCode": null,
+  "dropoffLatitude": 10.7798,
+  "dropoffLongitude": 106.6990
 }
 ```
+
+`dropoffLatitude`/`dropoffLongitude` la tuy chon (de app ve ban do); neu gui thi phai gui ca hai va hop le, va chung tham gia hash idempotency. Trip detail va danh sach loi moi tra them `pickupLatitude, pickupLongitude, dropoffLatitude, dropoffLongitude` (co the null voi chuyen cu).
 
 Response 201 va GET detail: `id, riderId, driverId, pickupAddress, dropoffAddress, fareEstimate, status, createdAt, updatedAt`. DriverId/updatedAt co the null. Khong coi gia tham khao truoc khi tao chuyen la gia da chot. Don vi tien va tinh hop le distance/time can duoc nhom Pricing chot truoc su dung tien that; khong tu nhan 1000 tren UI.
 

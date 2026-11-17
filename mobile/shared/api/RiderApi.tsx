@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
-import { placeIdOf, places } from '../domain';
-import { Button, Card, CityMap, Eyebrow, Icon, Metric, Note, palette, styles, T, Title } from '../ui';
+import { ActivityIndicator, View } from 'react-native';
+import { Button, Card, Eyebrow, Icon, Metric, Note, palette, styles, T, Title } from '../ui';
+import LiveMap from '../map/LiveMap';
+import { PlaceRow, PlaceSearch, quickPlaces } from '../map/PlacePicker';
+import { coordinateText, reverseGeocode } from '../map/geo';
+import type { Place } from '../map/geo';
+import type { LatLng } from '../map/mapScript';
+import { useRoute } from '../map/useRoute';
 import { GatewayError } from '../gateway';
 import { errorText, isNotFound, usePoll } from './hooks';
 import type { ApiScreenProps } from './ApiApp';
-import { coordinates, estimateRoute, isTerminal, priceText, riderCanCancel, shortId, statusName, statusText } from './trip';
+import { isTerminal, pointsOf, priceText, riderCanCancel, shortId, statusName, statusText } from './trip';
 import type { QuoteDto, TripDto } from './trip';
 
 export type SagaDto = { state: string; amount: number; paymentMethod: string; failureReason: string | null; deadlineUtc: string; completedAtUtc: string | null };
@@ -35,15 +40,18 @@ export function SagaCard({ saga }: { saga: SagaDto | null }) {
 
 export default function RiderApi({ call, claims }: ApiScreenProps) {
   const [loading, setLoading] = useState(true);
-  const [pickup, setPickup] = useState('university');
-  const [destination, setDestination] = useState('');
+  const [pickup, setPickup] = useState<Place | null>(quickPlaces[0]);
+  const [destination, setDestination] = useState<Place | null>(null);
+  const [field, setField] = useState<'pickup' | 'destination'>('destination');
   const [quote, setQuote] = useState<QuoteDto | null>(null);
   const [trip, setTrip] = useState<TripDto | null>(null);
   const [saga, setSaga] = useState<SagaDto | null>(null);
   const [error, setError] = useState('');
   const idempotencyKey = useRef('');
   const status = trip ? statusName(trip.status) : null;
-  const route = estimateRoute(coordinates[pickup], coordinates[destination || 'market']);
+  const draftRoute = useRoute(trip ? null : pickup, trip ? null : destination);
+  const tripPoints = trip ? pointsOf(trip) : { pickup: null, destination: null };
+  const tripRoute = useRoute(tripPoints.pickup, tripPoints.destination);
 
   const reload = async (id: string) => setTrip(await call<TripDto>('GET', `/api/trips/${id}`));
   const run = (task: () => Promise<void>) => async () => {
@@ -69,42 +77,64 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
     try { setSaga(await call<SagaDto>('GET', `/api/trips/${trip.id}/payment-saga`)); } catch (e) { if (!isNotFound(e)) throw e; }
   }, 2000, paymentPhase && (!saga || saga.state === 'AwaitingPayment' || saga.state === 'Compensating'));
 
+  // Map tap / search result -> the active field; the address comes from OpenStreetMap (coordinates until it answers).
+  const choose = (target: 'pickup' | 'destination', place: Place) => {
+    setQuote(null);
+    (target === 'pickup' ? setPickup : setDestination)(place);
+    if (target === 'pickup' && !destination) setField('destination');
+  };
+  const pick = (point: LatLng) => {
+    const target = field;
+    choose(target, { ...point, address: `Đang lấy địa chỉ… (${coordinateText(point)})` });
+    void reverseGeocode(point).then(address => (target === 'pickup' ? setPickup : setDestination)(current =>
+      current && current.latitude === point.latitude && current.longitude === point.longitude ? { ...point, address } : current));
+  };
+  const resolving = !!pickup?.address.startsWith('Đang lấy') || !!destination?.address.startsWith('Đang lấy');
+
   const getQuote = run(async () => {
-    setQuote(await call<QuoteDto>('POST', '/api/matching/quote', { ...route, rideType: 'standard' }));
+    if (!draftRoute) return;
+    setQuote(await call<QuoteDto>('POST', '/api/matching/quote', { distance: draftRoute.distance, estimatedTime: draftRoute.estimatedTime, rideType: 'standard' }));
     idempotencyKey.current = `mobile-${claims.sub}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   });
   const book = run(async () => {
-    const [latitude, longitude] = coordinates[pickup];
+    if (!pickup || !destination || !draftRoute) return;
     // One idempotency key per quote: tapping again after a lost response returns the same trip.
     setTrip(await call<TripDto>('POST', '/api/trips/', {
-      pickupAddress: places.find(p => p.id === pickup)!.name, dropoffAddress: places.find(p => p.id === destination)!.name,
-      pickupLatitude: latitude, pickupLongitude: longitude, ...route, rideType: 'standard', idempotencyKey: idempotencyKey.current,
+      pickupAddress: pickup.address, dropoffAddress: destination.address,
+      pickupLatitude: pickup.latitude, pickupLongitude: pickup.longitude,
+      dropoffLatitude: destination.latitude, dropoffLongitude: destination.longitude,
+      distance: draftRoute.distance, estimatedTime: draftRoute.estimatedTime, rideType: 'standard', idempotencyKey: idempotencyKey.current,
     }));
   });
   const confirm = run(async () => { await call('POST', `/api/trips/${trip!.id}/confirm-price`, {}); await reload(trip!.id); });
   const cancel = run(async () => { await call('POST', `/api/trips/${trip!.id}/cancel`, {}); await reload(trip!.id); });
-  const reset = () => { setTrip(null); setQuote(null); setSaga(null); setDestination(''); setError(''); };
+  const reset = () => { setTrip(null); setQuote(null); setSaga(null); setDestination(null); setField('destination'); setError(''); };
 
   if (loading) return <ActivityIndicator accessibilityLabel="Đang tải chuyến" color={palette.teal} style={{ marginTop: 60 }} />;
   const banner = !!error && <Note warning>{error}</Note>;
 
   if (!trip) return <>
-    <CityMap pickup={pickup} destination={destination} />
+    <LiveMap label="Bản đồ chọn điểm đón và điểm đến" pickup={pickup} destination={destination} route={draftRoute?.path} onPick={quote ? undefined : pick} />
     {!quote ? <Card>
       <Eyebrow>{`CHÀO ${(claims.name || claims.email).toUpperCase()}`}</Eyebrow><Title>Bạn muốn đi đâu?</Title>
-      <PlacePicker label="ĐÓN TÔI TẠI" value={pickup} onChange={id => { setPickup(id); if (id === destination) setDestination(''); }} />
-      <PlacePicker label="ĐƯA TÔI ĐẾN" value={destination} exclude={pickup} onChange={setDestination} />
+      <PlaceRow label="ĐIỂM ĐÓN" place={pickup} active={field === 'pickup'} color={palette.teal} onPress={() => setField('pickup')} />
+      <PlaceRow label="ĐIỂM ĐẾN" place={destination} active={field === 'destination'} color={palette.coral} onPress={() => setField('destination')} />
+      <PlaceSearch onSelect={place => choose(field, place)} />
+      {pickup && destination && (draftRoute
+        ? <View style={styles.row}><Metric label={draftRoute.source === 'osrm' ? 'Quãng đường (OSRM)' : 'Quãng đường ước tính'} value={`${draftRoute.distance.toLocaleString('vi-VN')} km`} /><Metric label="Thời gian" value={`${draftRoute.estimatedTime} phút`} /></View>
+        : <View style={styles.row}><ActivityIndicator color={palette.teal} /><T style={styles.flex}>Đang tìm đường đi...</T></View>)}
+      {draftRoute?.source === 'estimate' && <Note warning>Không lấy được đường đi từ OSRM; quãng đường đang ước tính theo đường chim bay.</Note>}
       {banner}
-      <Button title="Xem giá từ Pricing" icon="arrow" disabled={!destination} onPress={getQuote} />
+      <Button title="Xem giá từ Pricing" icon="arrow" disabled={!pickup || !destination || !draftRoute || resolving} onPress={getQuote} />
     </Card> : <Card>
       <Eyebrow>BÁO GIÁ TỪ MATCHING & PRICING</Eyebrow><Title>{priceText(quote.total)}</Title>
-      <TripRoute pickup={places.find(p => p.id === pickup)!.name} dropoff={places.find(p => p.id === destination)!.name} />
-      <View style={styles.row}><Metric label="Quãng đường ước tính" value={`${route.distance.toLocaleString('vi-VN')} km`} /><Metric label="Thời gian ước tính" value={`${route.estimatedTime} phút`} /></View>
+      <TripRoute pickup={pickup!.address} dropoff={destination!.address} />
+      <View style={styles.row}><Metric label="Quãng đường" value={`${draftRoute!.distance.toLocaleString('vi-VN')} km`} /><Metric label="Thời gian" value={`${draftRoute!.estimatedTime} phút`} /></View>
       <View style={styles.divider} />
       {/* Every field is an amount: distance/time are the per-km and per-minute charges, surge is the peak-hour surcharge. */}
       {quote.base !== 0 && <Line label="Phí mở cửa" value={priceText(quote.base)} />}
-      <Line label={`Cước theo km (${route.distance.toLocaleString('vi-VN')} km)`} value={priceText(quote.distance)} />
-      <Line label={`Cước theo phút (${route.estimatedTime} phút)`} value={priceText(quote.time)} />
+      <Line label={`Cước theo km (${draftRoute!.distance.toLocaleString('vi-VN')} km)`} value={priceText(quote.distance)} />
+      <Line label={`Cước theo phút (${draftRoute!.estimatedTime} phút)`} value={priceText(quote.time)} />
       <Line label="Phụ thu giờ cao điểm" value={priceText(quote.surge)} />
       <Line label="Phí phụ" value={priceText(quote.toll)} />
       <Line label="Giảm giá" value={priceText(quote.discount)} />
@@ -116,11 +146,10 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
     </Card>}
   </>;
 
-  const pickupId = placeIdOf(trip.pickupAddress);
-  const map = <CityMap pickup={pickupId} destination={placeIdOf(trip.dropoffAddress)} />;
+  const map = <LiveMap label={`Bản đồ chuyến từ ${trip.pickupAddress} đến ${trip.dropoffAddress}`} pickup={tripPoints.pickup} destination={tripPoints.destination} route={tripRoute?.path} />;
   const header = <><Eyebrow>{`CHUYẾN ${shortId(trip.id)} · ${statusText[status!].toUpperCase()}`}</Eyebrow></>;
 
-  if (status === 'Paid' || status === 'Cancelled' || status === 'Failed') return <Card>
+  if (status === 'Paid' || status === 'Cancelled' || status === 'Failed') return <>{map}<Card>
     <View style={styles.center}><View style={[styles.heroIcon, status !== 'Paid' && { backgroundColor: palette.sand }]}><Icon name={status === 'Paid' ? 'check' : 'warning'} size={34} color={status === 'Paid' ? palette.teal : palette.coral} /></View>
       {header}<Title>{status === 'Paid' ? 'Bạn đã đến nơi.' : status === 'Cancelled' ? 'Chuyến đã hủy' : 'Chuyến không thành công'}</Title>
       <T style={[styles.muted, { textAlign: 'center' }]}>{status === 'Paid' ? 'Payment Service đã thu tiền và Trip đã ghi nhận.' : status === 'Cancelled' ? 'Không phát sinh thanh toán cho chuyến đã hủy.' : trip.paymentFailureReason ? `Lý do: ${trip.paymentFailureReason}` : `Không tìm được tài xế sau ${trip.declineCount ?? 0} lần từ chối.`}</T>
@@ -129,7 +158,7 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
     <View style={styles.row}><Metric label="Giá chuyến" value={priceText(trip.fareEstimate)} /><Metric label="Tài xế" value={shortId(trip.driverId)} /></View>
     {paymentPhase && <SagaCard saga={saga} />}
     <Button title="Đặt chuyến mới" icon="arrow" onPress={reset} />
-  </Card>;
+  </Card></>;
 
   return <>
     {map}
@@ -152,16 +181,4 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
 
 function Line({ label, value }: { label: string; value: string }) {
   return <View style={styles.row}><T style={[styles.flex, styles.muted]}>{label}</T><T style={styles.place}>{value}</T></View>;
-}
-
-function PlacePicker({ label, value, exclude, onChange }: { label: string; value: string; exclude?: string; onChange: (id: string) => void }) {
-  return <View style={{ gap: 8 }}>
-    <T style={styles.caption}>{label}</T>
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-      {places.filter(place => place.id !== exclude).map(place => <Pressable key={place.id} accessibilityRole="radio" accessibilityState={{ checked: value === place.id }} accessibilityLabel={`${label} ${place.name}`} onPress={() => onChange(place.id)}
-        style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: value === place.id ? palette.teal : palette.line, backgroundColor: value === place.id ? palette.mint : palette.white }}>
-        <T style={[styles.caption, { color: value === place.id ? palette.teal : palette.ink }]}>{place.name}</T>
-      </Pressable>)}
-    </View>
-  </View>;
 }

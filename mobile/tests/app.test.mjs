@@ -3,16 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { findPlace, placeIdOf, places } from '../shared/domain.ts';
+import { places } from '../shared/domain.ts';
 import { coordinates } from '../shared/api/trip.ts';
 
-test('every sample place has coordinates and round-trips through its trip address', () => {
+test('every quick-pick place has real Ho Chi Minh City coordinates', () => {
   for (const place of places) {
-    assert.ok(coordinates[place.id], place.id);
-    assert.equal(placeIdOf(place.name), place.id);
-    assert.equal(findPlace(place.id), place);
+    const [latitude, longitude] = coordinates[place.id];
+    assert.ok(latitude > 10.6 && latitude < 10.95 && longitude > 106.5 && longitude < 106.9, place.id);
   }
-  assert.equal(placeIdOf('Địa chỉ lạ'), '');
 });
 
 test('separate mobile identities and entrypoints; both apps use the real API shell only', () => {
@@ -26,12 +24,13 @@ test('separate mobile identities and entrypoints; both apps use the real API she
     assert.match(read(`../apps/${app}/index.ts`), /registerRootComponent/);
     assert.match(read(`../apps/${app}/src/App.tsx`), new RegExp(`<MobileApp role="${app}" />`));
     const deps = JSON.parse(read(`../apps/${app}/package.json`)).dependencies;
-    assert.equal(deps['react-native-webview'], undefined);
+    assert.ok(deps['react-native-webview'], 'native map runs Leaflet inside a WebView');
+    assert.ok(deps.leaflet, 'web map bundles Leaflet');
     assert.equal(deps['@react-native-async-storage/async-storage'], undefined);
     const config = createRequire(import.meta.url)(`../apps/${app}/metro.config.js`);
     assert.ok(config.watchFolders.includes(fileURLToPath(new URL('../shared', import.meta.url))));
   }
   const shell = read('../shared/MobileApp.tsx');
   assert.match(shell, /ApiApp/);
-  assert.doesNotMatch(shell, /from.*apps\/(rider|driver)|WebView|localStorage|APP_MODE/);
+  assert.doesNotMatch(shell, /from.*apps\/(rider|driver)|localStorage|APP_MODE/);
 });

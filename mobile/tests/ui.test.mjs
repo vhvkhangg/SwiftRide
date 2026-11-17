@@ -39,7 +39,8 @@ function load(path) {
   return module.exports;
 }
 const shared = fileURLToPath(new URL('../shared/', import.meta.url));
-const { Button, CityMap } = load(resolve(shared, 'ui.tsx'));
+const { Button } = load(resolve(shared, 'ui.tsx'));
+const geo = load(resolve(shared, 'map/geo.ts'));
 let root;
 let container;
 async function mount(element) {
@@ -115,9 +116,35 @@ test('rejected action shows an alert, preserves form input, and permits retry', 
   assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
-test('CityMap labels pickup and destination for screen readers', async () => {
-  await mount(React.createElement(CityMap, { pickup: 'university', destination: 'market' }));
-  assert.match(container.querySelector('[role="img"]').getAttribute('aria-label'), /Đại học Sài Gòn.*Chợ Bến Thành/);
-  await act(async () => root.render(React.createElement(CityMap, { pickup: 'park' })));
-  assert.doesNotMatch(container.querySelector('[role="img"]').getAttribute('aria-label'), /điểm đến/);
+test('OSM address labels are short: place, street and district only', () => {
+  assert.equal(geo.shortAddress({ name: 'Chợ Bến Thành', address: { road: 'Lê Lợi', suburb: 'Phường Bến Thành', city: 'Thành phố Hồ Chí Minh' } }),
+    'Chợ Bến Thành, Lê Lợi, Phường Bến Thành');
+  assert.equal(geo.shortAddress({ address: { house_number: '273', road: 'An Dương Vương', city_district: 'Quận 5' } }), '273 An Dương Vương, Quận 5');
+  assert.equal(geo.shortAddress({ display_name: 'x'.repeat(300) }).length, 200);
+});
+
+test('road route comes from OSRM in km/minutes; any failure falls back to the straight-line estimate', async context => {
+  const from = { latitude: 10.7596, longitude: 106.6822 };
+  const to = { latitude: 10.7725, longitude: 106.698 };
+  context.mock.method(globalThis, 'fetch', async url => {
+    assert.match(String(url), /router\.project-osrm\.org\/route\/v1\/driving\/106\.6822,10\.7596;106\.698,10\.7725/);
+    return Response.json({ routes: [{ distance: 3456, duration: 545, geometry: { coordinates: [[106.6822, 10.7596], [106.698, 10.7725]] } }] });
+  });
+  assert.deepEqual(await geo.findRoute(from, to), { distance: 3.5, estimatedTime: 9, path: [[10.7596, 106.6822], [10.7725, 106.698]], source: 'osrm' });
+  context.mock.method(globalThis, 'fetch', async () => new Response('busy', { status: 503 }));
+  const fallback = await geo.findRoute(from, to);
+  assert.equal(fallback.source, 'estimate');
+  assert.equal(fallback.path, null);
+  assert.ok(fallback.distance > 0 && fallback.estimatedTime >= 1);
+});
+
+test('reverse geocoding falls back to coordinates; search keeps only valid points', async context => {
+  context.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+  assert.equal(await geo.reverseGeocode({ latitude: 10.123456, longitude: 106.654321 }), '10.12346, 106.65432');
+  context.mock.method(globalThis, 'fetch', async url => {
+    assert.match(String(url), /countrycodes=vn/);
+    return Response.json([{ lat: '10.77', lon: '106.70', name: 'Nhà hát Thành phố', address: { road: 'Đồng Khởi' } }, { lat: 'x', lon: '1' }]);
+  });
+  assert.deepEqual(await geo.searchPlaces('nhà hát'), [{ latitude: 10.77, longitude: 106.7, address: 'Nhà hát Thành phố, Đồng Khởi' }]);
+  assert.deepEqual(await geo.searchPlaces('   '), []);
 });
