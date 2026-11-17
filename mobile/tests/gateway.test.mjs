@@ -3,12 +3,11 @@ import assert from 'node:assert/strict';
 import { readConfig } from '../shared/config.ts';
 import { GatewayError, requestGateway } from '../shared/gateway.ts';
 
-test('demo is default; API configuration fails closed', () => {
-  assert.equal(readConfig().mode, 'demo');
-  assert.ok(readConfig('typo').error);
-  for (const url of ['', 'invalid', 'file:///tmp', 'https://user:pass@example.com', 'https://example.com?token=secret', 'https://example.com#secret']) assert.ok(readConfig('api', url).error);
-  assert.deepEqual(readConfig('api', 'http://localhost:5000/'), { mode: 'api', gatewayUrl: 'http://localhost:5000', keycloakIssuer: 'http://localhost:8180/realms/swiftride', error: '' });
-  assert.ok(readConfig('api', 'http://localhost:5000', 'ftp://kc').error);
+test('configuration defaults to the local stack and fails closed on unsafe URLs', () => {
+  assert.deepEqual(readConfig(), { gatewayUrl: 'http://localhost:5100', keycloakIssuer: 'http://localhost:8180/realms/swiftride', error: '' });
+  for (const url of ['invalid', 'file:///tmp', 'https://user:pass@example.com', 'https://example.com?token=secret', 'https://example.com#secret']) assert.ok(readConfig(url).error);
+  assert.equal(readConfig('http://192.168.1.10:5100/').gatewayUrl, 'http://192.168.1.10:5100');
+  assert.ok(readConfig('http://localhost:5100', 'ftp://kc').error);
 });
 
 test('Gateway preserves request body and headers without inventing endpoints', async context => {

@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Switch, View } from 'react-native';
-import { places } from '../domain';
+import { placeIdOf, places } from '../domain';
 import { Button, Card, CityMap, Eyebrow, Icon, Metric, Note, palette, styles, T, Title } from '../ui';
 import { GatewayError } from '../gateway';
 import { errorText, isNotFound, usePoll } from './hooks';
 import type { ApiScreenProps } from './ApiApp';
-import { mapOf, SagaCard, TripRoute } from './RiderApi';
+import { SagaCard, TripRoute } from './RiderApi';
 import type { SagaDto } from './RiderApi';
 import { coordinates, isTerminal, priceText, shortId, statusName, statusText } from './trip';
 import type { InvitationDto, TripDto } from './trip';
 
 const secondsLeft = (utc: string) => Math.max(0, Math.round((new Date(utc).getTime() - Date.now()) / 1000));
-const placeId = (address: string) => places.find(place => place.name === address)?.id ?? '';
 
 export default function DriverApi({ call, claims }: ApiScreenProps) {
   const [loading, setLoading] = useState(true);
@@ -67,7 +66,7 @@ export default function DriverApi({ call, claims }: ApiScreenProps) {
   const banner = !!error && <Note warning>{error}</Note>;
 
   if (!trip) return <>
-    <CityMap trip={mapOf(position, '')} />
+    <CityMap pickup={position} />
     <Card>
       <Eyebrow>KHÔNG GIAN TÀI XẾ</Eyebrow><Title>{`Chào ${claims.name || claims.email}.`}</Title>
       <View style={styles.row}><View style={styles.flex}><T style={styles.subtitle}>{online ? 'Sẵn sàng nhận chuyến' : 'Đang nghỉ ngơi'}</T><T style={styles.caption}>{online ? 'Vị trí được gửi lên Matching Service mỗi 60 giây.' : 'Bật để Matching có thể mời bạn.'}</T></View>
@@ -105,7 +104,7 @@ export default function DriverApi({ call, claims }: ApiScreenProps) {
   </Card>;
 
   return <>
-    <CityMap trip={mapOf(placeId(trip.pickupAddress), placeId(trip.dropoffAddress))} />
+    <CityMap pickup={placeIdOf(trip.pickupAddress)} destination={placeIdOf(trip.dropoffAddress)} />
     <Card>
       {header}
       <Title>{status === 'DriverAccepted' ? 'Bạn đã nhận chuyến.' : status === 'EnRoute' ? 'Đang đi đón khách.' : status === 'PickedUp' ? 'Đưa khách đến nơi.' : 'Đang đồng bộ trạng thái'}</Title>

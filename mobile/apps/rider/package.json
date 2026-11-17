@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@expo-google-fonts/be-vietnam-pro": "^0.4.1",
-    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^58.0.17",
     "expo-auth-session": "~58.0.18",
     "expo-crypto": "~58.0.8",

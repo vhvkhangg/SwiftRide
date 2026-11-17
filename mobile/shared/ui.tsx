@@ -5,7 +5,6 @@ import type { TextProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { findPlace } from './domain';
-import type { Trip } from './domain';
 
 export const palette = { ink: '#12383D', teal: '#087F8C', dark: '#064D56', muted: '#557078', paper: '#F3F5F0', line: '#DFE8E5', mint: '#E5F3EF', coral: '#BC573E', sand: '#FBF0DA', white: '#FFFFFF' };
 export const font = { regular: 'BeVietnamPro_400Regular', medium: 'BeVietnamPro_500Medium', bold: 'BeVietnamPro_700Bold' };
@@ -67,25 +66,8 @@ export function Title({ children }: PropsWithChildren) { return <T accessibility
 export function Note({ children, warning = false }: PropsWithChildren<{ warning?: boolean }>) {
   return <View style={[styles.note, warning && { backgroundColor: palette.sand }]}><Icon name={warning ? 'warning' : 'check'} size={19} color={warning ? palette.coral : palette.teal} /><T style={styles.noteText}>{children}</T></View>;
 }
-export function Demo({ children }: PropsWithChildren) { return <View style={styles.demo}><Eyebrow>ĐIỀU KHIỂN MÔ PHỎNG</Eyebrow>{children}</View>; }
 export function Metric({ label, value }: { label: string; value: string }) {
   return <View style={styles.metric}><T style={styles.metricValue}>{value}</T><T style={styles.caption}>{label}</T></View>;
-}
-
-export function Route({ trip }: { trip: Trip }) {
-  return <View style={styles.route}>
-    <View style={styles.row}><View style={styles.pickupDot} /><View style={styles.flex}><T style={styles.caption}>ĐIỂM ĐÓN</T><T style={styles.place}>{findPlace(trip.pickup).name}</T></View></View>
-    <View style={styles.routeDash} />
-    <View style={styles.row}><View style={styles.destinationDot} /><View style={styles.flex}><T style={styles.caption}>ĐIỂM ĐẾN</T><T style={styles.place}>{findPlace(trip.destination).name}</T></View></View>
-  </View>;
-}
-
-export function Person({ driver = false }: { driver?: boolean }) {
-  return <View style={styles.person}>
-    <View style={styles.avatar}><Icon name={driver ? 'bike' : 'user'} size={28} /></View>
-    <View style={styles.flex}><T style={styles.place}>{driver ? 'Minh Anh' : 'Khánh'}</T><T style={styles.caption}>{driver ? 'Honda Vision · Trắng' : 'Hành khách · Tài khoản demo'}</T></View>
-    {driver && <View style={styles.plate}><T style={styles.plateText}>59-S1</T><T style={styles.plateText}>123.45</T></View>}
-  </View>;
 }
 
 export function Sheet({ visible, title, onClose, children }: PropsWithChildren<{ visible: boolean; title: string; onClose: () => void }>) {
@@ -101,10 +83,13 @@ export function Sheet({ visible, title, onClose, children }: PropsWithChildren<{
 }
 
 const positions: Record<string, [number, number]> = { university: [62, 177], market: [281, 116], postoffice: [307, 53], park: [150, 57] };
-export function CityMap({ trip }: { trip: Trip }) {
-  const pickup = positions[trip.pickup];
-  const destination = positions[trip.destination];
-  return <View accessibilityRole="image" accessibilityLabel={`Bản đồ minh họa. Điểm đón ${findPlace(trip.pickup).name}${destination ? `, điểm đến ${findPlace(trip.destination).name}` : ''}. Không theo dõi GPS.`} style={styles.map}>
+/** Illustrative SVG map with the sample places; not a GPS or tile map. */
+export function CityMap({ pickup, destination = '' }: { pickup: string; destination?: string }) {
+  const from = positions[pickup] ?? positions.university;
+  const to = positions[destination];
+  const pickupName = findPlace(pickup)?.name ?? 'chưa chọn';
+  const destinationName = findPlace(destination)?.name;
+  return <View accessibilityRole="image" accessibilityLabel={`Bản đồ minh họa. Điểm đón ${pickupName}${destinationName ? `, điểm đến ${destinationName}` : ''}.`} style={styles.map}>
     <Svg width="100%" height={220} viewBox="0 0 360 220" {...(Platform.OS === 'web' ? { 'aria-hidden': true } : { accessible: false })}>
       <Rect width={360} height={220} fill="#E9EEE5" />
       {[18, 80, 142, 204, 266, 328].map(horizontal => [15, 76, 137, 198].map(vertical => <Rect key={`${horizontal}-${vertical}`} x={horizontal} y={vertical} width={46} height={42} rx={9} fill="#DFE6DC" />))}
@@ -113,9 +98,9 @@ export function CityMap({ trip }: { trip: Trip }) {
       <Rect x={116} y={30} width={62} height={51} rx={18} fill="#BED6BD" />
       <SvgText x={126} y={49} fontSize={8} fill="#5B7765">CÔNG VIÊN</SvgText><SvgText x={133} y={62} fontSize={8} fill="#5B7765">TAO ĐÀN</SvgText>
       <SvgText x={9} y={111} fontSize={8} fill="#72837C">TRẦN HƯNG ĐẠO</SvgText><SvgText x={212} y={43} fontSize={8} fill="#72837C">QUẬN 1</SvgText>
-      {destination && <Path d={`M${pickup[0]} ${pickup[1]} L${pickup[0]} 145 L${destination[0]} 145 L${destination[0]} ${destination[1]}`} fill="none" stroke={palette.teal} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />}
-      <Circle cx={pickup[0]} cy={pickup[1]} r={13} fill="#C5E3DE" /><Circle cx={pickup[0]} cy={pickup[1]} r={7} fill={palette.teal} stroke="white" strokeWidth={3} />
-      {destination && <Circle cx={destination[0]} cy={destination[1]} r={9} fill={palette.coral} stroke="white" strokeWidth={3} />}
+      {to && <Path d={`M${from[0]} ${from[1]} L${from[0]} 145 L${to[0]} 145 L${to[0]} ${to[1]}`} fill="none" stroke={palette.teal} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />}
+      <Circle cx={from[0]} cy={from[1]} r={13} fill="#C5E3DE" /><Circle cx={from[0]} cy={from[1]} r={7} fill={palette.teal} stroke="white" strokeWidth={3} />
+      {to && <Circle cx={to[0]} cy={to[1]} r={9} fill={palette.coral} stroke="white" strokeWidth={3} />}
     </Svg>
     <View style={styles.mapLabel}><T style={styles.mapLabelText}>TP. HỒ CHÍ MINH · BẢN ĐỒ MINH HỌA</T></View>
   </View>;
@@ -134,14 +119,13 @@ export const styles = StyleSheet.create({
   primary: { backgroundColor: palette.teal }, secondary: { backgroundColor: palette.white, borderWidth: 1, borderColor: palette.line },
   buttonText: { fontFamily: font.bold, fontSize: 13, lineHeight: 22, flexShrink: 1, textAlign: 'center' },
   note: { backgroundColor: palette.mint, borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  noteText: { flex: 1, fontSize: 12, lineHeight: 21 }, demo: { borderWidth: 1, borderStyle: 'dashed', borderColor: '#B9CDCA', padding: 14, borderRadius: 18, gap: 10 },
+  noteText: { flex: 1, fontSize: 12, lineHeight: 21 },
   metric: { flex: 1, gap: 2 }, metricValue: { fontFamily: font.bold, fontSize: 20, lineHeight: 28 },
   route: { gap: 4 }, pickupDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 3, borderColor: palette.teal },
   destinationDot: { width: 12, height: 12, borderRadius: 3, backgroundColor: palette.coral },
   routeDash: { height: 15, borderLeftWidth: 1, borderStyle: 'dashed', borderColor: '#B2C5C0', marginLeft: 5 },
   place: { fontFamily: font.medium, fontSize: 14, lineHeight: 22 },
   person: { flexDirection: 'row', alignItems: 'center', gap: 12 }, avatar: { width: 48, height: 48, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.mint },
-  plate: { paddingVertical: 4, paddingHorizontal: 8, borderWidth: 1, borderColor: palette.line, borderRadius: 8 }, plateText: { fontSize: 10, lineHeight: 15, fontFamily: font.bold, textAlign: 'center' },
   modalBackdrop: { flex: 1, backgroundColor: '#082F3866', justifyContent: 'flex-end', alignItems: 'center' },
   sheet: { maxHeight: '90%', width: '100%', maxWidth: 560, backgroundColor: palette.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22 },
   sheetHandle: { width: 38, height: 4, backgroundColor: palette.line, borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 8 },

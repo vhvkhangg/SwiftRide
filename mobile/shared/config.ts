@@ -4,16 +4,16 @@ function httpUrl(value: string) {
   return url.href.replace(/\/$/, '');
 }
 
+export const defaultGatewayUrl = 'http://localhost:5100';
 export const defaultKeycloakIssuer = 'http://localhost:8180/realms/swiftride';
 
-export function readConfig(mode = 'demo', gatewayUrl = '', keycloakIssuer = '') {
-  if (mode !== 'demo' && mode !== 'api') return { mode, gatewayUrl: '', keycloakIssuer: '', error: 'EXPO_PUBLIC_APP_MODE phải là demo hoặc api.' };
-  if (mode === 'demo') return { mode, gatewayUrl: '', keycloakIssuer: '', error: '' };
+/** Gateway and Keycloak addresses; defaults match docker compose on the same machine. */
+export function readConfig(gatewayUrl = '', keycloakIssuer = '') {
   let gateway: string;
-  try { gateway = httpUrl(gatewayUrl); } catch {
-    return { mode, gatewayUrl: '', keycloakIssuer: '', error: 'Chế độ API cần EXPO_PUBLIC_GATEWAY_URL là URL HTTP(S), không chứa mật khẩu, query hoặc fragment.' };
+  try { gateway = httpUrl(gatewayUrl || defaultGatewayUrl); } catch {
+    return { gatewayUrl: '', keycloakIssuer: '', error: 'EXPO_PUBLIC_GATEWAY_URL phải là URL HTTP(S), không chứa mật khẩu, query hoặc fragment.' };
   }
-  try { return { mode, gatewayUrl: gateway, keycloakIssuer: httpUrl(keycloakIssuer || defaultKeycloakIssuer), error: '' }; } catch {
-    return { mode, gatewayUrl: '', keycloakIssuer: '', error: 'EXPO_PUBLIC_KEYCLOAK_ISSUER phải là URL realm Keycloak, ví dụ http://localhost:8180/realms/swiftride.' };
+  try { return { gatewayUrl: gateway, keycloakIssuer: httpUrl(keycloakIssuer || defaultKeycloakIssuer), error: '' }; } catch {
+    return { gatewayUrl: '', keycloakIssuer: '', error: 'EXPO_PUBLIC_KEYCLOAK_ISSUER phải là URL realm Keycloak, ví dụ http://localhost:8180/realms/swiftride.' };
   }
 }

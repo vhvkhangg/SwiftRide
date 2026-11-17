@@ -23,7 +23,7 @@ Access token song 15 phut. Chi cho mot refresh request chay tai mot thoi diem va
 
 Driver/Admin chi duoc cap trong Keycloak Admin Console; dang ky cong khai khong tu cap Driver/Admin. Demo development: rider.demo@example.com, rider.other@example.com, driver.demo@example.com, driver.other@example.com, admin.demo@example.com.
 
-Trang thai app hien tai: che do `EXPO_PUBLIC_APP_MODE=api` cua `mobile/` dang nhap bang client `swiftride-mobile` (PKCE) va goi cac endpoint ben duoi qua Gateway (xem `mobile/README.md`). Web preview can Gateway bat CORS cho origin cua Expo (`Cors:AllowedOrigins`, mac dinh localhost:8081/8082).
+Trang thai app hien tai: app `mobile/` (khong con che do demo) dang nhap bang client `swiftride-mobile` (PKCE) va goi cac endpoint ben duoi qua Gateway (xem `mobile/README.md`). Web preview can Gateway bat CORS cho origin cua Expo (`Cors:AllowedOrigins`, mac dinh localhost:8081/8082).
 
 ## Rider flow
 

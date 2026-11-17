@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
-import { initialTrip, places } from '../domain';
+import { placeIdOf, places } from '../domain';
 import { Button, Card, CityMap, Eyebrow, Icon, Metric, Note, palette, styles, T, Title } from '../ui';
 import { GatewayError } from '../gateway';
 import { errorText, isNotFound, usePoll } from './hooks';
@@ -14,9 +14,6 @@ export const sagaText: Record<string, string> = {
   Abandoned: 'Quá hạn thanh toán', Compensating: 'Đang hoàn tiền', Refunded: 'Đã hoàn tiền',
 };
 
-const placeId = (address: string) => places.find(place => place.name === address)?.id ?? '';
-/** CityMap only needs pickup/destination ids; reuse it with a minimal demo-shaped object. */
-export const mapOf = (pickup: string, destination: string) => ({ ...initialTrip, pickup: pickup || 'university', destination });
 
 export function TripRoute({ pickup, dropoff }: { pickup: string; dropoff: string }) {
   return <View style={styles.route}>
@@ -92,7 +89,7 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
   const banner = !!error && <Note warning>{error}</Note>;
 
   if (!trip) return <>
-    <CityMap trip={mapOf(pickup, destination)} />
+    <CityMap pickup={pickup} destination={destination} />
     {!quote ? <Card>
       <Eyebrow>{`CHÀO ${(claims.name || claims.email).toUpperCase()}`}</Eyebrow><Title>Bạn muốn đi đâu?</Title>
       <PlacePicker label="ĐÓN TÔI TẠI" value={pickup} onChange={id => { setPickup(id); if (id === destination) setDestination(''); }} />
@@ -119,8 +116,8 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
     </Card>}
   </>;
 
-  const pickupId = placeId(trip.pickupAddress);
-  const map = <CityMap trip={mapOf(pickupId, placeId(trip.dropoffAddress))} />;
+  const pickupId = placeIdOf(trip.pickupAddress);
+  const map = <CityMap pickup={pickupId} destination={placeIdOf(trip.dropoffAddress)} />;
   const header = <><Eyebrow>{`CHUYẾN ${shortId(trip.id)} · ${statusText[status!].toUpperCase()}`}</Eyebrow></>;
 
   if (status === 'Paid' || status === 'Cancelled' || status === 'Failed') return <Card>

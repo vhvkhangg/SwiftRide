@@ -23,7 +23,7 @@ export default function ApiApp({ role, gatewayUrl, issuer }: { role: Role; gatew
   </ScrollView>;
   const props = { call: session.call, claims: session.claims };
   return <View style={styles.page}>
-    <View style={shell.header}><View style={styles.flex}><T style={shell.brand}>SwiftRide<T style={{ color: palette.teal }}>.</T></T><Eyebrow>{role === 'rider' ? 'RIDER · HÀNH KHÁCH' : 'DRIVER · TÀI XẾ'}</Eyebrow></View><View style={shell.live}><T style={shell.liveText}>API</T></View></View>
+    <View style={shell.header}><View style={styles.flex}><T style={shell.brand}>SwiftRide<T style={{ color: palette.teal }}>.</T></T><Eyebrow>{role === 'rider' ? 'RIDER · HÀNH KHÁCH' : 'DRIVER · TÀI XẾ'}</Eyebrow></View></View>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingTop: 12 }]}>
       {/* Keep the trip screen mounted so polling and local state survive switching tabs. */}
       <View style={[{ gap: 16 }, tab !== 'trip' && { display: 'none' }]}>{role === 'rider' ? <RiderApi {...props} /> : <DriverApi {...props} />}</View>
@@ -64,7 +64,6 @@ function ApiLogin({ role, ready, busy, error, issuer, onSignIn }: { role: Role; 
 const shell = StyleSheet.create({
   header: { paddingHorizontal: 22, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', backgroundColor: palette.white },
   brand: { fontFamily: font.bold, fontSize: 23, lineHeight: 31, letterSpacing: -1 },
-  live: { backgroundColor: palette.mint, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 7 }, liveText: { fontFamily: font.bold, fontSize: 10, letterSpacing: 2, color: palette.teal },
   tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: palette.line, backgroundColor: palette.white, paddingTop: 8, paddingBottom: 4 }, tab: { flex: 1, minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 3 },
 });
 const login = StyleSheet.create({
