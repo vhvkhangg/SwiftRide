@@ -13,18 +13,19 @@ import { useTrip } from './useTrip';
 import Login from './Login';
 import TripActions from './TripActions';
 import { readConfig } from './config';
+import ApiApp from './api/ApiApp';
 import { Button, Card, Eyebrow, font, Icon, Note, palette, Sheet, styles, T, Title } from './ui';
 
 export type Screen = { code: string; label: string; status: Status };
 export type Confirm = (title: string, message: string, onConfirm: () => void) => void;
 export type TripScreenProps = { trip: Trip; dispatch: Dispatch<Action>; confirm: Confirm };
 type Props = { role: Role; screens: Screen[]; renderTrip: (props: TripScreenProps) => ReactNode };
-const config = readConfig(process.env.EXPO_PUBLIC_APP_MODE, process.env.EXPO_PUBLIC_GATEWAY_URL);
+const config = readConfig(process.env.EXPO_PUBLIC_APP_MODE, process.env.EXPO_PUBLIC_GATEWAY_URL, process.env.EXPO_PUBLIC_KEYCLOAK_ISSUER);
 
 export default function MobileApp(props: Props) {
   const [loaded, fontError] = useFonts({ BeVietnamPro_400Regular, BeVietnamPro_500Medium, BeVietnamPro_700Bold });
   return <SafeAreaProvider><StatusBar style="dark" /><SafeAreaView style={shell.safe} edges={['top', 'bottom']}>
-    {!loaded && !fontError ? <ActivityIndicator accessibilityLabel="Đang tải ứng dụng" style={styles.flex} color={palette.teal} /> : config.error || config.mode === 'api' ? <ScrollView contentContainerStyle={[styles.content, { paddingTop: 40 }]}><Eyebrow>SWIFTRIDE · {props.role.toUpperCase()}</Eyebrow><Title>Chưa thể kết nối API</Title><Note warning>{config.error || 'Chế độ API chưa nối Auth và chuyến đi. Cần contract từ BE trước khi sử dụng; không đăng nhập demo hoặc tạo dữ liệu giả trong chế độ này.'}</Note><T style={styles.caption}>Kiểm tra EXPO_PUBLIC_APP_MODE và EXPO_PUBLIC_GATEWAY_URL, sau đó khởi động lại Expo. Dùng EXPO_PUBLIC_APP_MODE=demo để xem giao diện mô phỏng.</T></ScrollView> : <AppContent {...props} />}
+    {!loaded && !fontError ? <ActivityIndicator accessibilityLabel="Đang tải ứng dụng" style={styles.flex} color={palette.teal} /> : config.error ? <ScrollView contentContainerStyle={[styles.content, { paddingTop: 40 }]}><Eyebrow>SWIFTRIDE · {props.role.toUpperCase()}</Eyebrow><Title>Chưa thể kết nối API</Title><Note warning>{config.error}</Note><T style={styles.caption}>Kiểm tra EXPO_PUBLIC_APP_MODE và EXPO_PUBLIC_GATEWAY_URL, sau đó khởi động lại Expo. Dùng EXPO_PUBLIC_APP_MODE=demo để xem giao diện mô phỏng.</T></ScrollView> : config.mode === 'api' ? <ApiApp role={props.role} gatewayUrl={config.gatewayUrl} issuer={config.keycloakIssuer} /> : <AppContent {...props} />}
   </SafeAreaView></SafeAreaProvider>;
 }
 

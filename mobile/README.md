@@ -18,19 +18,32 @@ Mật khẩu demo: `demo1234`. Nút điền tài khoản chỉ điền form; c�
 
 Mặc định `EXPO_PUBLIC_APP_MODE=demo`. Nút chính nằm cố định phía trên thanh tab; lỗi lưu chuyến có nút thử lưu lại, không cần thao tác lại chuyến. Các nút chặn bấm nhanh liên tiếp và hỗ trợ trạng thái chờ cho tác vụ bất đồng bộ.
 
-Để chuẩn bị môi trường API, đặt biến môi trường trước khi chạy Expo (áp dụng riêng cho mỗi terminal):
+Chế độ **API** (`EXPO_PUBLIC_APP_MODE=api`) chạy luồng thật qua backend; chế độ demo giữ nguyên để xem giao diện offline. Cần stack Docker đang chạy (`docker compose up -d` ở thư mục gốc).
 
 ```powershell
 $env:EXPO_PUBLIC_APP_MODE = 'api'
-$env:EXPO_PUBLIC_GATEWAY_URL = 'http://localhost:5000'
-npm run preview:rider
+$env:EXPO_PUBLIC_GATEWAY_URL = 'http://localhost:5100'
+# Tùy chọn, mặc định http://localhost:8180/realms/swiftride
+$env:EXPO_PUBLIC_KEYCLOAK_ISSUER = 'http://localhost:8180/realms/swiftride'
+npm run preview:rider   # terminal thứ hai: npm run preview:driver
 ```
 
-URL trên chỉ là ví dụ; dùng địa chỉ Gateway của môi trường thực tế. Trên điện thoại, `localhost` là điện thoại, không phải máy chạy BE. Không đặt token hoặc bí mật vào biến `EXPO_PUBLIC_*`.
+| | Chế độ API |
+|---|---|
+| Đăng nhập | Keycloak, client `swiftride-mobile`, Authorization Code + PKCE (S256). App mở trang đăng nhập của Keycloak, không nhận mật khẩu. Token chỉ giữ trong bộ nhớ; tự refresh trước khi hết hạn (một request refresh tại một thời điểm); đăng xuất thu hồi refresh token. App kiểm tra role: app Rider chỉ nhận tài khoản Rider, app Driver chỉ nhận Driver. |
+| Rider | Chọn điểm đón/đến → `POST /api/matching/quote` (bảng giá chi tiết: cước, surge, phí, VAT) → `POST /api/trips/` (kèm `idempotencyKey`) → `POST /confirm-price` → theo dõi trạng thái, số lần tài xế từ chối / ngưỡng k → Saga thanh toán (`GET /api/trips/{id}/payment-saga`) → kết quả. Hủy chuyến khi trạng thái cho phép. |
+| Driver | Bật nhận chuyến và chọn vị trí giả lập → `POST /api/drivers/location` (gửi lại mỗi 60 giây để không quá TTL vị trí) → danh sách lời mời có đếm ngược → nhận/từ chối → đi đón → đã đón → đã trả khách → xem Saga thanh toán. |
+| Khôi phục | Mở lại app: `GET /api/trips/active` lấy chuyến đang chạy. HTTP là nguồn sự thật; app hỏi lại trạng thái mỗi 2 giây (chưa dùng SignalR). |
+| Lỗi | 401/403/409/5xx hiện thông báo; 409 tự tải lại chuyến. Không tự gửi lại POST. |
+| Đăng nhập trên web | Chuyển hướng cả trang sang Keycloak rồi quay lại (không dùng popup vì trình duyệt điện thoại hay chặn). Đăng xuất thoát luôn phiên SSO của Keycloak. |
 
-**API hiện bị chặn có chủ đích:** chỉ hiện thông báo chưa tích hợp, không mở đăng nhập demo, đọc/ghi chuyến demo hoặc hiện nút mô phỏng. Chưa có Auth thật hoặc endpoint nghiệp vụ được nối. Sai mode/URL cũng bị chặn thay vì âm thầm quay về demo. Đổi cấu hình cần khởi động lại Expo. Để quay lại demo: `$env:EXPO_PUBLIC_APP_MODE = 'demo'`.
+**Demo Rider và Driver trên cùng một máy:** hai app dùng chung phiên SSO Keycloak (cookie của `localhost:8180`), nên mở app Driver trong **cửa sổ ẩn danh hoặc trình duyệt khác**. Nếu trang Keycloak hiện sẵn email của tài khoản kia, bấm **Restart login** để đổi tài khoản; app từ chối tài khoản sai role.
 
-`shared/gateway.ts` tập trung request, timeout, hủy và lỗi HTTP/mạng; không tự retry, không suy đoán endpoint/response nghiệp vụ. Kết quả JSON là `unknown`, cần kiểm tra theo contract khi tích hợp. Không báo thành công sau timeout; xác minh chuyến/giao dịch trước khi gửi lại. Module này chưa được gọi từ màn demo.
+Quãng đường/thời gian gửi cho Pricing được ước tính từ tọa độ 4 địa điểm mẫu (đường chim bay × 1,3, 22 km/h). Giá hiển thị đúng con số Pricing trả về, không nhân thêm.
+
+Web preview gọi Gateway khác origin nên Gateway bật CORS cho `http://localhost:8081` và `http://localhost:8082` (`Cors:AllowedOrigins`). Trên điện thoại thật, `localhost` là chính điện thoại: đặt `EXPO_PUBLIC_GATEWAY_URL` là IP LAN của máy chạy Gateway và chạy stack với `KEYCLOAK_PUBLIC_URL` trỏ cùng IP đó để issuer trong token khớp. Không đặt token hoặc bí mật vào biến `EXPO_PUBLIC_*`. Sai mode/URL bị chặn thay vì âm thầm quay về demo; đổi cấu hình cần khởi động lại Expo.
+
+`shared/gateway.ts` tập trung request, timeout, hủy và lỗi HTTP/mạng; không tự retry. Mã chế độ API nằm trong `shared/api/`.
 
 Yêu cầu Node.js >= 22.13, npm và Expo Go tương thích SDK 58. Cài dependencies **một lần tại thư mục `mobile/`**, không cài riêng từng app.
 
@@ -92,8 +105,8 @@ npm run preview:driver
 
 ## Giới hạn demo
 
-- **Chưa gọi API, kể cả Auth ở Gateway đã có trong repo. Không có xác thực thật.**
-- Hai app **chưa đồng bộ chuyến**. Dùng điều khiển có nhãn Mô phỏng để tạo phản hồi phía còn lại. Không xem đây là demo end-to-end qua backend.
+- Các giới hạn dưới đây là của **chế độ demo**. Chế độ API ở trên gọi backend thật và hai app đồng bộ qua Trip Service.
+- Ở chế độ demo, hai app **không đồng bộ chuyến**; dùng điều khiển có nhãn Mô phỏng để tạo phản hồi phía còn lại.
 - Bản đồ SVG minh họa; chỉ có 4 địa điểm mẫu, không có GPS, map tiles, dẫn đường, push hoặc background tracking.
 - Giá/ETA/quãng đường là dữ liệu mẫu, không triển khai công thức giá của BE; không có giao dịch, ví hoặc thu nhập thực.
 - Không thêm chat, cuộc gọi, lịch sử, đăng ký hoặc dashboard thu nhập ngoài phạm vi luồng đã có.
@@ -106,12 +119,13 @@ mobile/
   apps/rider/       entry, UI Rider, app.json, eas.json, icon
   apps/driver/      entry, UI Driver, app.json, eas.json, icon
   shared/          native UI dùng chung, domain demo, lưu chuyến
+  shared/api/      chế độ API: đăng nhập Keycloak, màn Rider/Driver gọi Gateway
   tests/           kiểm tra Node.js, không thêm test framework
 ```
 
 Mỗi app chỉ import màn hình thuộc vai trò của mình. Shared không import ngược màn Rider/Driver; chỉ chia sẻ thành phần nền. `metro.config.js` bổ sung thư mục `shared/` vào watchFolders vì đây không phải một workspace package, bảo đảm sửa component dùng chung cũng cập nhật bundle.
 
-Khi nối BE, thay các hành động mô phỏng bằng lời gọi API Gateway và trạng thái do server trả về. Không dùng reducer hoặc tài khoản demo làm nguồn xác thực nghiệp vụ. Token thật cần kho bảo mật native, không AsyncStorage. Điện thoại thật phải gọi địa chỉ LAN/HTTPS của Gateway, không phải `localhost` trên máy tính; kiểm tra quyền truy cập tài nguyên tại server.
+Chế độ API không dùng reducer hay tài khoản demo: trạng thái lấy từ server, quyền do Gateway/Trip kiểm tra. Token không ghi xuống AsyncStorage.
 
 ## Kiểm tra
 

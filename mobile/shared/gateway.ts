@@ -22,10 +22,14 @@ export async function requestGateway(baseUrl: string, path: string, options: Req
     const response = await fetch(url.href, { ...options, signal: controller.signal });
     if (!response.ok) throw new GatewayError(response.status === 401 ? 'Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.' : response.status === 403 ? 'Tài khoản không có quyền thực hiện thao tác này.' : `Gateway trả lỗi HTTP ${response.status}. Kiểm tra trạng thái trước khi gửi lại.`, response.status);
     if (response.status === 204) return null;
-    try { return await response.json(); } catch (error) {
+    let text: string;
+    try { text = await response.text(); } catch (error) {
       if (controller.signal.aborted) throw error;
       throw new GatewayError('Phản hồi Gateway không phải JSON hợp lệ.');
     }
+    // 202 Accepted (confirm-price, driver-reject, dropoff) has no body.
+    if (!text.trim()) return null;
+    try { return JSON.parse(text); } catch { throw new GatewayError('Phản hồi Gateway không phải JSON hợp lệ.'); }
   } catch (error) {
     if (error instanceof GatewayError) throw error;
     throw new GatewayError(controller.signal.aborted ? 'Yêu cầu bị hủy hoặc hết thời gian chờ. Chưa xác định kết quả; kiểm tra trạng thái trước khi thử lại.' : 'Không kết nối được Gateway. Kiểm tra mạng; không tự tạo lại chuyến hoặc thanh toán.');

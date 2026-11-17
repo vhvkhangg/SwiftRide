@@ -7,7 +7,8 @@ test('demo is default; API configuration fails closed', () => {
   assert.equal(readConfig().mode, 'demo');
   assert.ok(readConfig('typo').error);
   for (const url of ['', 'invalid', 'file:///tmp', 'https://user:pass@example.com', 'https://example.com?token=secret', 'https://example.com#secret']) assert.ok(readConfig('api', url).error);
-  assert.deepEqual(readConfig('api', 'http://localhost:5000/'), { mode: 'api', gatewayUrl: 'http://localhost:5000', error: '' });
+  assert.deepEqual(readConfig('api', 'http://localhost:5000/'), { mode: 'api', gatewayUrl: 'http://localhost:5000', keycloakIssuer: 'http://localhost:8180/realms/swiftride', error: '' });
+  assert.ok(readConfig('api', 'http://localhost:5000', 'ftp://kc').error);
 });
 
 test('Gateway preserves request body and headers without inventing endpoints', async context => {
@@ -35,6 +36,8 @@ test('HTTP failures, empty and invalid responses are explicit; no automatic retr
     fetch.mock.restore();
   }
   context.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 204 }));
+  assert.equal(await requestGateway('https://example.com', '/test'), null);
+  context.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 202 }));
   assert.equal(await requestGateway('https://example.com', '/test'), null);
   context.mock.method(globalThis, 'fetch', async () => new Response('not JSON'));
   await assert.rejects(requestGateway('https://example.com', '/test'), /JSON/);

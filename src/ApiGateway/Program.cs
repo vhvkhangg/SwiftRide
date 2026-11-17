@@ -32,6 +32,14 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
     });
 // Default policy = authenticated user; every proxied route uses it (AuthorizationPolicy "default").
 builder.Services.AddAuthorization();
+// Browser clients (Expo web preview of the Rider/Driver apps) call the Gateway cross-origin.
+// Native apps do not send Origin, so CORS only matters for the web build; origins come from config.
+var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
+    .WithOrigins(corsOrigins)
+    .WithHeaders("Authorization", "Content-Type")
+    .WithMethods("GET", "POST")
+    .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
 // YARP: routes/clusters in appsettings.json section "ReverseProxy"; Compose overrides cluster addresses.
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
@@ -66,6 +74,8 @@ app.MapWhen(context => context.Request.Path.StartsWithSegments("/health"), local
 });
 app.UseWebSockets();
 app.UseRouting();
+// Before authentication so preflight (OPTIONS, no token) is answered here instead of returning 401.
+app.UseCors();
 app.UseAuthentication();
 app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"), hub =>
 {

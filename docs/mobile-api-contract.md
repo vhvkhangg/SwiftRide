@@ -23,12 +23,12 @@ Access token song 15 phut. Chi cho mot refresh request chay tai mot thoi diem va
 
 Driver/Admin chi duoc cap trong Keycloak Admin Console; dang ky cong khai khong tu cap Driver/Admin. Demo development: rider.demo@example.com, rider.other@example.com, driver.demo@example.com, driver.other@example.com, admin.demo@example.com.
 
-Trang thai app hien tai: man hinh dang nhap trong `mobile/` van la ban demo noi bo, chua noi Keycloak; client `swiftride-mobile` da san sang trong realm.
+Trang thai app hien tai: che do `EXPO_PUBLIC_APP_MODE=api` cua `mobile/` dang nhap bang client `swiftride-mobile` (PKCE) va goi cac endpoint ben duoi qua Gateway (xem `mobile/README.md`). Web preview can Gateway bat CORS cho origin cua Expo (`Cors:AllowedOrigins`, mac dinh localhost:8081/8082).
 
 ## Rider flow
 
 1. GET /userinfo cua Keycloak (hoac doc claim `role` trong token), xac nhan role Rider.
-2. POST /api/matching/quote de hien gia tham khao. Body: distance (km), estimatedTime (phut), rideType, promoCode (optional). Response: base, distance, time, surge, toll, discount, tax, total.
+2. POST /api/matching/quote de hien gia tham khao. Body: distance (km), estimatedTime (phut), rideType, promoCode (optional). Response: base, distance, time, surge, toll, discount, tax, total - deu la SO TIEN (distance = cuoc theo km, time = cuoc theo phut, surge = tien phu thu cao diem, khong phai he so).
 3. POST /api/trips/ de tao chuyen va lay gia do Trip goi Pricing noi bo. Khong gui fareEstimate; RiderId trong body bi ghi de boi JWT.
 4. Hien gia `fareEstimate` tu chuyen vua tao; Rider dong y thi POST /api/trips/{id}/confirm-price, body `{}`, response 202.
 5. Cho `tripChanged` hoac poll GET /api/trips/{id}; 202 chi la da nhan yeu cau, khong co nghia da co tai xe.
