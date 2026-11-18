@@ -1,117 +1,92 @@
 # SwiftRide Mobile
 
-Hai ứng dụng React Native + Expo + TypeScript, viết lại giao diện bằng `View`, `Text`, `Pressable`, `TextInput`, `ScrollView`, `Modal` và `Switch`. Không dùng HTML/CSS của bản web, Capacitor hay WebView. Giữ bảng màu teal và font Be Vietnam Pro của thiết kế trước.
+Hai ứng dụng React Native + Expo + TypeScript cho **Rider** và **Driver**. Cả hai gọi backend thật: đăng nhập bằng Keycloak, mọi thao tác đi qua API Gateway tới Trip, Matching & Pricing và Payment. Không còn chế độ demo hay dữ liệu giả.
 
 | | Rider | Driver |
 |---|---|---|
 | Thư mục | `apps/rider` | `apps/driver` |
 | Tên cài đặt | SwiftRide Rider | SwiftRide Driver |
 | Android / iOS ID | `com.swiftride.rider` | `com.swiftride.driver` |
-| Metro dev port | 8081 | 8082 |
-| Tài khoản demo | `rider@swiftride.demo` | `driver@swiftride.demo` |
+| URL scheme (redirect đăng nhập native) | `swiftride-rider://` | `swiftride-driver://` |
+| Cổng Metro / web preview | 8081 | 8082 |
+| Tài khoản dev (Keycloak) | `rider.demo@example.com`, `rider.other@example.com` | `driver.demo@example.com`, `driver.other@example.com` |
 
-Mật khẩu demo: `demo1234`. Nút điền tài khoản chỉ điền form; cần bấm Đăng nhập. Không dùng mật khẩu thật. Phiên đăng nhập chỉ ở bộ nhớ; mở lại app cần đăng nhập demo lại, nhưng tiến trình chuyến vẫn lưu.
+Mật khẩu tài khoản dev nằm trong `keycloak/swiftride-realm.json` (biến `DEV_ACCOUNT_PASSWORD`). Rider đăng ký ngay trong app (nút **Đăng ký**); tài khoản Driver chỉ tạo được trong Keycloak Admin Console.
 
-## Chạy trên điện thoại
+## Chạy
 
-### Chế độ demo / API
-
-Mặc định `EXPO_PUBLIC_APP_MODE=demo`. Nút chính nằm cố định phía trên thanh tab; lỗi lưu chuyến có nút thử lưu lại, không cần thao tác lại chuyến. Các nút chặn bấm nhanh liên tiếp và hỗ trợ trạng thái chờ cho tác vụ bất đồng bộ.
-
-Để chuẩn bị môi trường API, đặt biến môi trường trước khi chạy Expo (áp dụng riêng cho mỗi terminal):
-
-```powershell
-$env:EXPO_PUBLIC_APP_MODE = 'api'
-$env:EXPO_PUBLIC_GATEWAY_URL = 'http://localhost:5000'
-npm run preview:rider
-```
-
-URL trên chỉ là ví dụ; dùng địa chỉ Gateway của môi trường thực tế. Trên điện thoại, `localhost` là điện thoại, không phải máy chạy BE. Không đặt token hoặc bí mật vào biến `EXPO_PUBLIC_*`.
-
-**API hiện bị chặn có chủ đích:** chỉ hiện thông báo chưa tích hợp, không mở đăng nhập demo, đọc/ghi chuyến demo hoặc hiện nút mô phỏng. Chưa có Auth thật hoặc endpoint nghiệp vụ được nối. Sai mode/URL cũng bị chặn thay vì âm thầm quay về demo. Đổi cấu hình cần khởi động lại Expo. Để quay lại demo: `$env:EXPO_PUBLIC_APP_MODE = 'demo'`.
-
-`shared/gateway.ts` tập trung request, timeout, hủy và lỗi HTTP/mạng; không tự retry, không suy đoán endpoint/response nghiệp vụ. Kết quả JSON là `unknown`, cần kiểm tra theo contract khi tích hợp. Không báo thành công sau timeout; xác minh chuyến/giao dịch trước khi gửi lại. Module này chưa được gọi từ màn demo.
-
-Yêu cầu Node.js >= 22.13, npm và Expo Go tương thích SDK 58. Cài dependencies **một lần tại thư mục `mobile/`**, không cài riêng từng app.
+Cần backend đang chạy: ở thư mục gốc `docker compose up -d` và chờ các service healthy. Yêu cầu Node.js >= 22.13; cài dependencies **một lần tại `mobile/`**.
 
 ```powershell
 cd E:\SwiftRide\mobile
 npm ci
+npm run preview:rider    # http://localhost:8081
+npm run preview:driver   # terminal thứ hai, http://localhost:8082
+```
+
+Mặc định app gọi Gateway `http://localhost:5100` và Keycloak `http://localhost:8180/realms/swiftride`. Đổi bằng biến môi trường trước khi chạy Expo (đổi xong phải khởi động lại Expo):
+
+```powershell
+$env:EXPO_PUBLIC_GATEWAY_URL = 'http://192.168.1.10:5100'
+$env:EXPO_PUBLIC_KEYCLOAK_ISSUER = 'http://192.168.1.10:8180/realms/swiftride'
 npm run start:rider
 ```
 
-Mở terminal thứ hai:
+Trên điện thoại thật, `localhost` là chính điện thoại: dùng IP LAN của máy chạy Docker và chạy stack với `KEYCLOAK_PUBLIC_URL=http://<IP>:8180` để issuer trong token khớp. URL sai định dạng sẽ hiện màn "Cấu hình chưa hợp lệ" thay vì gọi nhầm chỗ. Không đặt token hoặc bí mật vào biến `EXPO_PUBLIC_*`.
+
+**Demo Rider và Driver trên cùng một máy:** hai app dùng chung phiên SSO của Keycloak (cookie của `localhost:8180`), nên mở app Driver trong **cửa sổ ẩn danh hoặc trình duyệt khác**. Nếu trang Keycloak hiện sẵn email của tài khoản kia, bấm **Restart login** để đổi tài khoản; app từ chối tài khoản sai role.
+
+## Luồng
+
+| | |
+|---|---|
+| Đăng ký | Chỉ app Rider. Form trong app (họ, tên, email, mật khẩu ≥ 12 ký tự, nhập lại) → `POST /api/auth/register` (Gateway, không cần token) → Gateway tạo user trong Keycloak bằng service account, user mới luôn là Rider. Xong thì nút Đăng nhập mở trang đăng nhập với email điền sẵn. Lỗi trùng email (409), sai dữ liệu (400), quá nhiều lần (429) hiện rõ trên form. |
+| Đăng nhập | Keycloak, client `swiftride-mobile`, Authorization Code + PKCE (S256). Web: chuyển hướng cả trang sang Keycloak rồi quay lại (không dùng popup vì trình duyệt điện thoại hay chặn); native: trình duyệt hệ thống. App không nhận mật khẩu. Token chỉ giữ trong bộ nhớ, tự refresh trước khi hết hạn (một request refresh tại một thời điểm). Đăng xuất thu hồi refresh token và thoát phiên SSO. App Rider chỉ nhận tài khoản có role Rider, app Driver chỉ nhận Driver. |
+| Bản đồ | Bản đồ OpenStreetMap thật bằng Leaflet: web dùng gói `leaflet`, native nhúng cùng mã đó trong `react-native-webview` (Leaflet 1.9.4 từ unpkg, có SRI). Chạm bản đồ để chọn điểm; tên địa chỉ lấy từ Nominatim (lỗi hoặc chậm thì hiện tọa độ). Có ô tìm địa chỉ (Nominatim, giới hạn Việt Nam) và 4 địa điểm chọn nhanh. Đường đi, quãng đường và thời gian lấy từ OSRM; OSRM lỗi thì ước tính đường chim bay × 1,3, 22 km/h và báo rõ trên màn hình. |
+| Rider | Chọn điểm đón/đến trên bản đồ → `POST /api/matching/quote` (bảng giá: cước theo km, theo phút, phụ thu cao điểm, phí phụ, giảm giá, VAT) → `POST /api/trips/` (kèm `idempotencyKey` và tọa độ đón/đến) → `POST /confirm-price` → theo dõi trạng thái, số tài xế đã từ chối / ngưỡng k → Saga thanh toán (`GET /api/trips/{id}/payment-saga`) → kết quả. Hủy được khi trạng thái cho phép. |
+| Driver | Bật nhận chuyến, chọn vị trí giả lập bằng cách chạm bản đồ / tìm địa chỉ → `POST /api/drivers/location` (gửi lại mỗi 60 giây để không quá TTL vị trí) → lời mời có đếm ngược, bản đồ hiện tài xế + điểm đón/đến + đường đi → nhận / từ chối → đi đón → đã đón (xe dời tới điểm đón) → đã trả khách (xe dời tới điểm đến) → xem Saga thanh toán. |
+| Khôi phục | Mở lại app: `GET /api/trips/active` lấy chuyến đang chạy. HTTP là nguồn sự thật; app hỏi lại trạng thái mỗi 2 giây (chưa dùng SignalR). |
+| Lỗi | 401/403/409/5xx hiện thông báo; 409 tự tải lại chuyến. Không tự gửi lại POST. |
+
+Giá hiển thị đúng con số Pricing trả về, không nhân thêm. Vị trí tài xế vẫn là GPS giả lập (chọn trên bản đồ), chưa đọc GPS thiết bị và chưa dẫn đường. Dịch vụ OSM công cộng (tile, Nominatim, OSRM demo) chỉ phù hợp cho bài tập/demo: Nominatim giới hạn 1 request/giây, app chỉ gọi khi người dùng chạm hoặc bấm Tìm.
+
+Web preview gọi Gateway khác origin nên Gateway bật CORS cho `http://localhost:8081` và `http://localhost:8082` (`Cors:AllowedOrigins`). Keycloak đã có dữ liệu từ trước cần thêm `http://localhost:8082/*` vào redirect URI của client `swiftride-mobile` (hoặc tạo lại DB Keycloak) để app Driver bản web đăng nhập được.
+
+Đăng ký trong app cần client `swiftride-registration` (đã có trong `swiftride-realm.json`). Keycloak import realm từ trước thì thêm bằng lệnh sau (PowerShell, ở thư mục gốc, giữ nguyên dữ liệu), hoặc xóa volume `keycloak-postgres-data` để import lại:
 
 ```powershell
-cd E:\SwiftRide\mobile
-npm run start:driver
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password keycloak-admin-dev
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh create clients -r swiftride -s clientId=swiftride-registration -s publicClient=false -s secret=swiftride-registration-dev-secret -s standardFlowEnabled=false -s directAccessGrantsEnabled=false -s serviceAccountsEnabled=true
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh add-roles -r swiftride --uusername service-account-swiftride-registration --cclientid realm-management --rolename manage-users
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh add-roles -r swiftride --rname default-roles-swiftride --rolename Rider
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update realms/swiftride -s registrationAllowed=false
+docker compose up -d --build api-gateway
 ```
 
-Điện thoại và máy tính dùng cùng mạng Wi-Fi tin cậy. Mở từng dự án bằng QR trong Expo Go. Expo Go là môi trường xem trước; **hai icon ứng dụng riêng chỉ xuất hiện khi build/cài hai app riêng**, không phải khi quét QR trong Expo Go. Nếu Expo Go không hỗ trợ SDK đang dùng, dùng bản Expo Go phù hợp hoặc build native. Chỉ mở firewall cho Metro trên mạng riêng tin cậy.
+## Cấu trúc
+
+```text
+mobile/
+  apps/rider/       entry Rider, app.json, eas.json, icon
+  apps/driver/      entry Driver, app.json, eas.json, icon
+  shared/           khung app, cấu hình, client Gateway, UI dùng chung, 4 địa điểm chọn nhanh
+  shared/map/       bản đồ Leaflet (LiveMap.web.tsx cho web, LiveMap.tsx qua WebView cho native), Nominatim, OSRM
+  shared/api/       đăng nhập Keycloak, màn Rider/Driver gọi Gateway, helper thuần (trip.ts)
+  tests/            test Node.js
+```
+
+`metro.config.js` thêm `shared/` vào watchFolders để sửa code dùng chung cũng cập nhật bundle. `shared/gateway.ts` tập trung request, timeout, hủy và lỗi HTTP/mạng; không tự retry.
 
 ## Hai ứng dụng Android riêng
 
-Cần Android Studio, Android SDK, JDK phù hợp React Native, cấu hình `ANDROID_HOME`, emulator đang chạy hoặc điện thoại bật USB debugging. Kiểm tra `adb devices` nhận thiết bị. Tắt Metro preview đang chiếm cùng port trước khi chạy các lệnh này.
+Cần Android Studio, Android SDK, JDK phù hợp React Native, `ANDROID_HOME`, emulator hoặc điện thoại bật USB debugging (`adb devices` nhận thiết bị). Tắt Metro preview đang chiếm cùng cổng trước.
 
 ```powershell
 cd E:\SwiftRide\mobile
 npm run android:rider
 ```
 
-Trong terminal khác, chạy `npm run android:driver`. `expo run:android` tạo native project nếu chưa có, build debug và cài app. Hai app có application ID khác nhau nên không ghi đè nhau. Native project sinh tự động trong mỗi thư mục app và được Git bỏ qua; sửa cấu hình Expo, không sửa tay mã nguồn sinh tự động.
-
-Build APK chia sẻ bằng EAS (tùy chọn, cần tài khoản Expo, mạng và quota build):
-
-```powershell
-cd E:\SwiftRide\mobile\apps\rider
-npx eas-cli login
-npx eas-cli build --platform android --profile preview
-```
-
-Lặp lại từ `mobile/apps/driver`. Lần đầu EAS yêu cầu liên kết/tạo project riêng cho từng app và cấu hình signing. Không đưa keystore, mật khẩu signing hoặc token vào Git. Chưa tạo project EAS hoặc tải source lên dịch vụ thay người dùng. Profile `preview` tạo APK; `production` tạo AAB. Đổi application ID trước khi phát hành chính thức nếu cần namespace khác.
-
-iOS có bundle ID riêng; build cục bộ cần macOS/Xcode. Chưa kiểm thử trên thiết bị iOS.
-
-## Xem nhanh giao diện trên máy tính
-
-```powershell
-npm run preview:rider
-npm run preview:driver
-```
-
-Địa chỉ mặc định: `http://localhost:8081` và `http://localhost:8082`. Đây là **React Native Web phục vụ kiểm tra bố cục**, không phải bản web Vite cũ và không thay thế kiểm thử native. Hai lệnh cần hai terminal. Không dùng đồng thời `start` và `preview` cho cùng app trên cùng port.
-
-## Luồng đã có
-
-- Rider: đăng nhập, chọn/tìm điểm đón và đến, xem giá, xác nhận/từ chối giá, tìm tài xế, theo dõi nhận chuyến/đi đón/đang đi, hủy trước khi đón, thanh toán, kết quả chuyến.
-- Driver: đăng nhập, bật/tắt nhận chuyến, lời mời nhận/từ chối, đi đón, xác nhận đã đón/đã trả, hủy trước đón, chờ và xem kết quả thanh toán.
-- Hai app có màn tài khoản, đăng xuất, bảng kịch bản riêng; không có nút đổi Rider/Driver.
-- Bộ chọn địa điểm, xác nhận thao tác và kịch bản dùng native Modal. Có safe area, tránh bàn phím, nhãn accessibility, vùng chạm >= 48px và xử lý nút Back Android cho màn chính.
-- AsyncStorage lưu chuyến, không lưu mật khẩu/token. Key và dữ liệu riêng từng app; snapshot được kiểm tra version, vai trò, kiểu dữ liệu và trạng thái. Không đọc được bộ nhớ thì chặn ghi để tránh ghi đè chuyến cũ.
-- Payment giữ nguyên mã giao dịch khi thử lại, tối đa 3 lần thử; hết lượt vẫn chờ xử lý, không báo thành công giả.
-
-## Giới hạn demo
-
-- **Chưa gọi API, kể cả Auth ở Gateway đã có trong repo. Không có xác thực thật.**
-- Hai app **chưa đồng bộ chuyến**. Dùng điều khiển có nhãn Mô phỏng để tạo phản hồi phía còn lại. Không xem đây là demo end-to-end qua backend.
-- Bản đồ SVG minh họa; chỉ có 4 địa điểm mẫu, không có GPS, map tiles, dẫn đường, push hoặc background tracking.
-- Giá/ETA/quãng đường là dữ liệu mẫu, không triển khai công thức giá của BE; không có giao dịch, ví hoặc thu nhập thực.
-- Không thêm chat, cuộc gọi, lịch sử, đăng ký hoặc dashboard thu nhập ngoài phạm vi luồng đã có.
-- `expo export` kiểm tra bundle JavaScript/Hermes, **không tạo APK và không chứng minh native build chạy trên thiết bị**.
-
-## Cấu trúc và nối BE sau
-
-```text
-mobile/
-  apps/rider/       entry, UI Rider, app.json, eas.json, icon
-  apps/driver/      entry, UI Driver, app.json, eas.json, icon
-  shared/          native UI dùng chung, domain demo, lưu chuyến
-  tests/           kiểm tra Node.js, không thêm test framework
-```
-
-Mỗi app chỉ import màn hình thuộc vai trò của mình. Shared không import ngược màn Rider/Driver; chỉ chia sẻ thành phần nền. `metro.config.js` bổ sung thư mục `shared/` vào watchFolders vì đây không phải một workspace package, bảo đảm sửa component dùng chung cũng cập nhật bundle.
-
-Khi nối BE, thay các hành động mô phỏng bằng lời gọi API Gateway và trạng thái do server trả về. Không dùng reducer hoặc tài khoản demo làm nguồn xác thực nghiệp vụ. Token thật cần kho bảo mật native, không AsyncStorage. Điện thoại thật phải gọi địa chỉ LAN/HTTPS của Gateway, không phải `localhost` trên máy tính; kiểm tra quyền truy cập tài nguyên tại server.
+Terminal khác: `npm run android:driver`. Hai app có application ID khác nhau nên không ghi đè nhau; native project sinh tự động và được Git bỏ qua. Build APK chia sẻ bằng EAS (tùy chọn): `npx eas-cli build --platform android --profile preview` trong từng thư mục app; không đưa keystore hay token vào Git. iOS có bundle ID riêng; build cục bộ cần macOS/Xcode, chưa kiểm thử trên iOS.
 
 ## Kiểm tra
 
@@ -119,24 +94,8 @@ Khi nối BE, thay các hành động mô phỏng bằng lời gọi API Gateway
 cd E:\SwiftRide\mobile
 npm run typecheck
 npm test
-npm run export:android
 ```
 
-Test bao phủ luồng Rider/Driver, offline, địa điểm không hợp lệ, chuyển trạng thái, hủy, giới hạn từ chối/retry, chống settle lặp, snapshot hỏng/khác app, đăng nhập demo riêng và cấu hình hai ứng dụng.
+Test bao phủ: form đăng ký (thứ tự lỗi, gửi đúng field không kèm token/role, thông báo 409/400/429/503/mạng, không tự gửi lại), ánh xạ trạng thái chuyến (giá trị lạ không bao giờ bị coi là đã xong), ước tính quãng đường, đường đi OSRM và dự phòng khi lỗi, rút gọn địa chỉ OSM, tìm địa chỉ, tọa độ chuyến từ server, hiển thị giá, đọc claim từ token Keycloak, cấu hình URL, client Gateway (giữ body/header, chặn đường dẫn lạ, lỗi HTTP rõ ràng, body rỗng của 202, không tự retry), nút chống bấm lặp và trạng thái bận, bản đồ có nhãn accessibility, và hai app tách biệt định danh. Luồng đầu-cuối được kiểm tra thủ công trên Docker (Rider đặt xe → Driver nhận → đón → trả → Saga Completed; hủy chuyến; đăng xuất).
 
-`tests/ui.test.mjs` thêm kiểm tra component bằng React/React DOM thật, React Native Web và jsdom (chỉ dev dependency), chạy trong `npm test`. TypeScript có sẵn chuyển TSX khi chạy test; không sinh file build. AsyncStorage, SVG và safe-area được thay bằng test doubles. Test bao phủ bấm lặp, khóa/loading, tác vụ thất bại và thử lại, giữ form đăng nhập, ẩn/hiện mật khẩu, nút theo vai trò/trạng thái, xác nhận trả khách, lỗi đọc không ghi đè dữ liệu, lỗi lưu/thử lưu, thứ tự ghi và unmount khi đang đọc.
-
-jsdom không có layout engine hoặc bàn phím native; cảnh báo thiếu ResizeObserver trong test không phải bằng chứng lỗi bố cục. Các test này không chứng minh safe area, VoiceOver, Dynamic Type hoặc trải nghiệm iPhone thật đã đạt.
-
-### Checklist nghiệm thu UI trên thiết bị
-
-- [ ] iPhone thật: mở bàn phím ở đăng nhập/tìm địa điểm; trường đang nhập và nút đóng vẫn truy cập được, không mất dữ liệu khi đóng bàn phím.
-- [ ] Safe area: thử máy có notch/home indicator và xoay ngang; nút chính, tab và sheet không bị che.
-- [ ] Chữ lớn: tăng cỡ chữ hệ thống, kiểm tra tên địa điểm dài, giá, nút xác nhận và thông báo lỗi; nội dung cuộn được, không cắt chữ.
-- [ ] VoiceOver/TalkBack: tên nút rõ, đọc được lỗi và trạng thái đang bận, focus không thoát khỏi sheet đang mở.
-- [ ] Android Back: đóng sheet trước, từ tài khoản về chuyến, từ báo giá về sửa hành trình; thoát không tự hủy chuyến.
-- [ ] Đóng/mở lại app ở chuyến đang chạy hoặc thanh toán chờ: giữ đúng chuyến, không tự chuyển thành đã thanh toán.
-
-Kiểm tra browser ngày 21/10/2026: nút xác nhận Rider nằm trong viewport ở 320/390/430 × 568, không tràn ngang; sheet tìm địa điểm có trạng thái không tìm thấy ở 320 × 568. Đây là kiểm tra web, không đánh dấu thay các mục native phía trên.
-
-`npm audit` ngày 12/10/2026 còn báo cảnh báo phụ thuộc gián tiếp của Expo/Metro (gồm `braces`, `node-forge`, `uuid`). Registry chưa có bản sửa tương thích cho toàn bộ chuỗi; không dùng `npm audit fix --force` để hạ Expo/React Native sang major cũ. Chưa đánh giá khả năng khai thác cho bản phát hành; rà soát lại trước khi deploy/build phân phối. Không đưa dev server ra Internet.
+`npm audit` còn báo cảnh báo phụ thuộc gián tiếp của Expo/Metro; không dùng `npm audit fix --force` để hạ Expo/React Native. Không đưa dev server ra Internet.

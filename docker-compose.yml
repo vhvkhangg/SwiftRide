@@ -213,6 +213,8 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-keycloak-admin-dev}
       # Realm import resolves ${DEV_ACCOUNT_PASSWORD} for the seeded demo accounts (first import only).
       DEV_ACCOUNT_PASSWORD: ${DEV_ACCOUNT_PASSWORD:-SwiftRide-demo-2026!}
+      # Secret of client swiftride-registration (Gateway creates Rider accounts for in-app sign-up).
+      REGISTRATION_CLIENT_SECRET: ${REGISTRATION_CLIENT_SECRET:-swiftride-registration-dev-secret}
     volumes:
       - ./keycloak/swiftride-realm.json:/opt/keycloak/data/import/swiftride-realm.json:ro
     depends_on:
@@ -238,6 +240,9 @@ services:
       Authentication__MetadataAddress: http://keycloak:8080/realms/swiftride/.well-known/openid-configuration
       Authentication__RequireHttpsMetadata: "false"
       Authentication__Audience: swiftride-api
+      # In-app Rider sign-up: POST /api/auth/register -> Keycloak Admin API (service account, manage-users only)
+      Registration__KeycloakUrl: http://keycloak:8080
+      Registration__ClientSecret: ${REGISTRATION_CLIENT_SECRET:-swiftride-registration-dev-secret}
       # YARP cluster destinations (routes are in src/ApiGateway/appsettings.json)
       ReverseProxy__Clusters__trip__Destinations__primary__Address: http://trip-service:8080/
       ReverseProxy__Clusters__matching__Destinations__primary__Address: http://matching-service:8080/

@@ -8,7 +8,6 @@ import { runInThisContext } from 'node:vm';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
-import { initialTrip, snapshot, storageKey } from '../shared/domain.ts';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 for (const name of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'ShadowRoot', 'MutationObserver', 'getComputedStyle']) {
@@ -18,7 +17,6 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const require = createRequire(import.meta.url);
 const native = require('react-native-web');
-const storage = { getItem: async () => null, setItem: async () => {} };
 const cache = new Map();
 const Svg = ({ accessible, ...props }) => React.createElement('svg', props);
 function load(path) {
@@ -28,7 +26,6 @@ function load(path) {
   const code = ts.transpileModule(readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const localRequire = name => {
     if (name === 'react-native') return native;
-    if (name === '@react-native-async-storage/async-storage') return storage;
     if (name === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 0, bottom: 34, left: 0, right: 0 }) };
     if (name === 'react-native-svg') return { __esModule: true, default: Svg, Circle: 'circle', Path: 'path', Rect: 'rect', Text: 'text' };
     if (name === 'expo-linear-gradient') return { LinearGradient: native.View };
@@ -43,9 +40,7 @@ function load(path) {
 }
 const shared = fileURLToPath(new URL('../shared/', import.meta.url));
 const { Button } = load(resolve(shared, 'ui.tsx'));
-const { useTrip } = load(resolve(shared, 'useTrip.ts'));
-const { default: Login } = load(resolve(shared, 'Login.tsx'));
-const { default: TripActions } = load(resolve(shared, 'TripActions.tsx'));
+const geo = load(resolve(shared, 'map/geo.ts'));
 let root;
 let container;
 async function mount(element) {
@@ -65,8 +60,6 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   root = null;
-  storage.getItem = async () => null;
-  storage.setItem = async () => {};
 });
 after(() => dom.window.close());
 
@@ -123,135 +116,82 @@ test('rejected action shows an alert, preserves form input, and permits retry', 
   assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
-test('invalid login preserves email and password; password visibility works', async () => {
-  let logins = 0;
-  await mount(React.createElement(Login, { role: 'rider', onLogin: () => logins++ }));
-  await act(async () => button('Điền tài khoản demo').click());
-  const password = button('Mật khẩu');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(password, 'wrong-password');
-    password.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+test('OSM address labels are short: place, street and district only', () => {
+  assert.equal(geo.shortAddress({ name: 'Chợ Bến Thành', address: { road: 'Lê Lợi', suburb: 'Phường Bến Thành', city: 'Thành phố Hồ Chí Minh' } }),
+    'Chợ Bến Thành, Lê Lợi, Phường Bến Thành');
+  assert.equal(geo.shortAddress({ address: { house_number: '273', road: 'An Dương Vương', city_district: 'Quận 5' } }), '273 An Dương Vương, Quận 5');
+  assert.equal(geo.shortAddress({ display_name: 'x'.repeat(300) }).length, 200);
+});
+
+test('road route comes from OSRM in km/minutes; any failure falls back to the straight-line estimate', async context => {
+  const from = { latitude: 10.7596, longitude: 106.6822 };
+  const to = { latitude: 10.7725, longitude: 106.698 };
+  context.mock.method(globalThis, 'fetch', async url => {
+    assert.match(String(url), /router\.project-osrm\.org\/route\/v1\/driving\/106\.6822,10\.7596;106\.698,10\.7725/);
+    return Response.json({ routes: [{ distance: 3456, duration: 545, geometry: { coordinates: [[106.6822, 10.7596], [106.698, 10.7725]] } }] });
   });
-  await act(async () => button('Đăng nhập').click());
-  assert.equal(logins, 0);
-  assert.equal(button('Tài khoản').value, 'rider@swiftride.demo');
-  assert.equal(password.value, 'wrong-password');
-  assert.ok(container.querySelector('[role="alert"]'));
-  await act(async () => button('Hiện mật khẩu').click());
-  assert.equal(password.type, 'text');
-  await act(async () => button('Ẩn mật khẩu').click());
-  assert.equal(password.type, 'password');
+  assert.deepEqual(await geo.findRoute(from, to), { distance: 3.5, estimatedTime: 9, path: [[10.7596, 106.6822], [10.7725, 106.698]], source: 'osrm' });
+  context.mock.method(globalThis, 'fetch', async () => new Response('busy', { status: 503 }));
+  const fallback = await geo.findRoute(from, to);
+  assert.equal(fallback.source, 'estimate');
+  assert.equal(fallback.path, null);
+  assert.ok(fallback.distance > 0 && fallback.estimatedTime >= 1);
 });
 
-test('failed restore never overwrites saved trip; retry restores it', async () => {
-  const saved = { ...initialTrip, destination: 'market', status: 'searching' };
-  let reads = 0;
-  const writes = [];
-  storage.getItem = async () => { if (++reads === 1) throw new Error('unavailable'); return snapshot(saved, 'rider'); };
-  storage.setItem = async (...args) => { writes.push(args); };
-  let state;
-  function Probe() { state = useTrip('rider'); return null; }
-  await mount(React.createElement(Probe));
-  assert.equal(state.ready, true);
-  assert.equal(state.canSave, false);
-  assert.equal(writes.length, 0);
-  await act(async () => state.retryLoad());
-  assert.deepEqual(state.trip, saved);
-  assert.equal(state.canSave, true);
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0][0], storageKey('rider'));
+test('reverse geocoding falls back to coordinates; search keeps only valid points', async context => {
+  context.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+  assert.equal(await geo.reverseGeocode({ latitude: 10.123456, longitude: 106.654321 }), '10.12346, 106.65432');
+  context.mock.method(globalThis, 'fetch', async url => {
+    assert.match(String(url), /countrycodes=vn/);
+    return Response.json([{ lat: '10.77', lon: '106.70', name: 'Nhà hát Thành phố', address: { road: 'Đồng Khởi' } }, { lat: 'x', lon: '1' }]);
+  });
+  assert.deepEqual(await geo.searchPlaces('nhà hát'), [{ latitude: 10.77, longitude: 106.7, address: 'Nhà hát Thành phố, Đồng Khởi' }]);
+  assert.deepEqual(await geo.searchPlaces('   '), []);
 });
 
-test('save failure preserves current trip; retry exposes loading and saves same snapshot', async () => {
-  const saved = { ...initialTrip, destination: 'market', status: 'quoted' };
-  const pending = deferred();
-  const writes = [];
-  storage.getItem = async () => snapshot(saved, 'rider');
-  storage.setItem = async (...args) => { writes.push(args); if (writes.length === 1) throw new Error('quota'); await pending.promise; };
-  let state;
-  function Probe() { state = useTrip('rider'); return React.createElement(Button, { title: 'Retry', busy: state.saving, onPress: state.retrySave }); }
-  await mount(React.createElement(Probe));
-  assert.equal(state.saveFailed, true);
-  assert.deepEqual(state.trip, saved);
-  await act(async () => { button('Retry').click(); button('Retry').click(); });
-  assert.equal(state.saving, true);
-  assert.equal(button('Retry').getAttribute('aria-busy'), 'true');
-  assert.equal(writes.length, 2);
-  assert.deepEqual(writes[0], writes[1]);
-  await act(async () => pending.resolve());
-  assert.equal(state.saveFailed, false);
-  assert.equal(state.saving, false);
-  assert.deepEqual(state.trip, saved);
+// In-app Rider sign-up (shared/api/register.ts -> POST /api/auth/register).
+const { problemDetail } = load(resolve(shared, 'gateway.ts'));
+const { emptyRegistration, registerRider, registrationError } = load(resolve(shared, 'api/register.ts'));
+const valid = { lastName: 'Nguyễn', firstName: 'An', email: ' an.nguyen@example.com ', password: 'Mat-khau-du-dai-1', confirm: 'Mat-khau-du-dai-1' };
+
+test('sign-up form follows the server rules and reports the first problem in form order', () => {
+  assert.equal(registrationError(valid), '');
+  assert.match(registrationError(emptyRegistration), /họ/);
+  assert.match(registrationError({ ...valid, firstName: ' ' }), /tên/);
+  assert.match(registrationError({ ...valid, email: 'an@local' }), /Email/);
+  assert.match(registrationError({ ...valid, password: 'short', confirm: 'short' }), /12/);
+  assert.match(registrationError({ ...valid, email: 'long.enough@example.com', password: 'LONG.ENOUGH@example.com', confirm: 'LONG.ENOUGH@example.com' }), /trùng email/);
+  assert.match(registrationError({ ...valid, confirm: 'Mat-khau-khac-12' }), /không khớp/);
 });
 
-test('storage writes remain ordered and finish with latest trip', async () => {
-  const pending = deferred();
-  const writes = [];
-  storage.setItem = async (...args) => { writes.push(args); if (writes.length === 1) await pending.promise; };
-  let state;
-  function Probe() { state = useTrip('rider'); return null; }
-  await mount(React.createElement(Probe));
-  await act(async () => state.dispatch({ type: 'place', field: 'destination', id: 'market' }));
-  await act(async () => state.dispatch({ type: 'quote' }));
-  assert.equal(writes.length, 1);
-  assert.equal(state.saving, true);
-  await act(async () => pending.resolve());
-  assert.equal(writes.length, 3);
-  assert.equal(writes.at(-1)[1], snapshot(state.trip, 'rider'));
-  assert.equal(state.saving, false);
+test('sign-up posts only the account fields to the Gateway, without a token or role', async context => {
+  const calls = [];
+  context.mock.method(globalThis, 'fetch', async (...args) => { calls.push(args); return Response.json({ email: 'an.nguyen@example.com', role: 'Rider' }, { status: 201 }); });
+  assert.equal(await registerRider('http://localhost:5100', valid), 'an.nguyen@example.com');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'http://localhost:5100/api/auth/register');
+  assert.equal(calls[0][1].headers.Authorization, undefined);
+  assert.deepEqual(JSON.parse(calls[0][1].body), { email: 'an.nguyen@example.com', password: 'Mat-khau-du-dai-1', firstName: 'An', lastName: 'Nguyễn' });
 });
 
-test('trip actions follow role and payment state; dropoff requires confirmation', async () => {
-  const actions = [];
-  let confirmation;
-  const props = { dispatch: action => actions.push(action), confirm: (...args) => { confirmation = args; } };
-  await mount(null);
-  for (const [role, status, label] of [
-    ['rider', 'quoted', 'Xác nhận đặt xe'], ['driver', 'searching', 'Nhận chuyến'],
-    ['driver', 'accepted', 'Bắt đầu đi đón'], ['driver', 'enroute', 'Đã đón khách'],
-    ['driver', 'pickedup', 'Đã trả khách'], ['rider', 'droppedoff', 'Thanh toán mô phỏng'],
-  ]) {
-    await act(async () => root.render(React.createElement(TripActions, { ...props, role, trip: { ...initialTrip, destination: 'market', status } })));
-    assert.ok(button(label), `${role}/${status}`);
-  }
-  await act(async () => root.render(React.createElement(TripActions, { ...props, role: 'driver', trip: { ...initialTrip, status: 'pickedup' } })));
-  await act(async () => button('Đã trả khách').click());
-  assert.equal(actions.length, 0);
-  assert.equal(confirmation[0], 'Đã trả khách?');
-  confirmation[2]();
-  assert.deepEqual(actions, [{ type: 'dropoff' }]);
-  for (const trip of [{ ...initialTrip }, { ...initialTrip, status: 'payment_pending', paymentError: true, paymentAttempts: 3 }]) {
-    await act(async () => root.render(React.createElement(TripActions, { ...props, role: 'rider', trip })));
-    assert.equal(container.querySelector('[role="button"]').getAttribute('aria-disabled'), 'true');
-  }
-  await act(async () => root.render(React.createElement(TripActions, { ...props, role: 'driver', trip: { ...initialTrip, status: 'droppedoff' } })));
-  assert.equal(container.querySelector('[role="button"]'), null);
+test('sign-up errors are explained: duplicate email, server validation, rate limit, network', async context => {
+  const answer = { status: 409, body: '' };
+  const fetch = context.mock.method(globalThis, 'fetch', async () => new Response(answer.body, { status: answer.status }));
+  await assert.rejects(registerRider('http://localhost:5100', valid), /đã được đăng ký/);
+  Object.assign(answer, { status: 400, body: JSON.stringify({ title: 'x', errors: { password: ['Mật khẩu cần từ 12 đến 128 ký tự.'] } }) });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /Mật khẩu cần từ 12/);
+  Object.assign(answer, { status: 429, body: '' });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /quá nhiều lần/);
+  Object.assign(answer, { status: 503, body: JSON.stringify({ detail: 'Chưa tạo được tài khoản lúc này. Thử lại sau ít phút.' }) });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /Thử lại sau/);
+  fetch.mock.mockImplementation(async () => { throw new TypeError('Failed to fetch'); });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /đã được tạo/);
+  assert.equal(fetch.mock.callCount(), 5, 'never retried automatically');
 });
 
-test('unmount during restore prevents late writes', async () => {
-  const pending = deferred();
-  let writes = 0;
-  storage.getItem = () => pending.promise;
-  storage.setItem = async () => { writes++; };
-  function Probe() { useTrip('rider'); return null; }
-  await mount(React.createElement(Probe));
-  await act(async () => root.unmount());
-  root = null;
-  await act(async () => pending.resolve(snapshot(initialTrip, 'rider')));
-  assert.equal(writes, 0);
-});
-
-test('late failed save does not replace successful latest snapshot with an error', async () => {
-  const pending = deferred();
-  const writes = [];
-  storage.setItem = async (...args) => { writes.push(args); if (writes.length === 1) await pending.promise; };
-  let state;
-  function Probe() { state = useTrip('rider'); return null; }
-  await mount(React.createElement(Probe));
-  await act(async () => state.dispatch({ type: 'place', field: 'destination', id: 'park' }));
-  await act(async () => pending.reject(new Error('old write failed')));
-  assert.equal(writes.length, 2);
-  assert.equal(writes[1][1], snapshot(state.trip, 'rider'));
-  assert.equal(state.saveFailed, false);
-  assert.equal(state.saving, false);
+test('problem details: detail first, then the first validation error, otherwise nothing', () => {
+  assert.equal(problemDetail('{"detail":"Email này đã được đăng ký."}'), 'Email này đã được đăng ký.');
+  assert.equal(problemDetail('{"errors":{"email":["Email không hợp lệ."]}}'), 'Email không hợp lệ.');
+  assert.equal(problemDetail('not json'), undefined);
+  assert.equal(problemDetail(''), undefined);
 });

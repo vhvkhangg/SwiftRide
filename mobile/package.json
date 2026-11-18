@@ -2,8 +2,13 @@
   "name": "swiftride-mobile",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/rider", "apps/driver"],
-  "engines": { "node": ">=22.13.0" },
+  "workspaces": [
+    "apps/rider",
+    "apps/driver"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "start:rider": "npm run start --workspace=@swiftride/rider",
     "start:driver": "npm run start --workspace=@swiftride/driver",
@@ -15,5 +20,10 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "export:android": "npm run export:android --workspaces"
   },
-  "devDependencies": { "typescript": "~6.0.3", "@types/react": "~19.2.2", "jsdom": "^29.1.1" }
+  "devDependencies": {
+    "@types/leaflet": "^1.9.22",
+    "@types/react": "~19.2.2",
+    "jsdom": "^29.1.1",
+    "typescript": "~6.0.3"
+  }
 }
