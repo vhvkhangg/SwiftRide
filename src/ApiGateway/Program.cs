@@ -1,4 +1,6 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using SwiftRide.ApiGateway.Registration;
 using SwiftRide.ApiGateway.Proxy;
 using SwiftRide.Security;
 using Yarp.ReverseProxy.Transforms;
@@ -40,6 +42,18 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithHeaders("Authorization", "Content-Type")
     .WithMethods("GET", "POST")
     .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
+// Rider self sign-up from the app: Gateway creates the account in Keycloak with a service account
+// (manage-users only). Anonymous, so it is rate limited per client IP.
+var registration = builder.Configuration.GetSection(RegistrationOptions.Section).Get<RegistrationOptions>() ?? new();
+builder.Services.AddSingleton(registration);
+builder.Services.AddHttpClient<KeycloakRegistrationClient>(client => client.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(RegistrationEndpoint.RateLimitPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = builder.Configuration.GetValue("Registration:PermitsPerWindow", 10), Window = TimeSpan.FromMinutes(15), QueueLimit = 0 }));
+});
 // YARP: routes/clusters in appsettings.json section "ReverseProxy"; Compose overrides cluster addresses.
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
@@ -95,6 +109,13 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/api/hubs/trips"
     });
 });
 app.UseAuthorization();
+app.UseRateLimiter();
+app.MapPost("/api/auth/register", async (RegisterRiderRequest request, KeycloakRegistrationClient keycloak, CancellationToken ct) =>
+{
+    var errors = RiderRegistration.Validate(request);
+    if (errors.Count > 0) return Results.ValidationProblem(errors, title: "Thông tin đăng ký chưa hợp lệ");
+    return RegistrationEndpoint.ToHttpResult(await keycloak.CreateRiderAsync(request, ct), request.Email!.Trim());
+}).AllowAnonymous().RequireRateLimiting(RegistrationEndpoint.RateLimitPolicy);
 app.MapReverseProxy();
 await app.RunAsync();
 

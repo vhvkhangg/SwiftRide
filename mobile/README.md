@@ -11,7 +11,7 @@ Hai ứng dụng React Native + Expo + TypeScript cho **Rider** và **Driver**. 
 | Cổng Metro / web preview | 8081 | 8082 |
 | Tài khoản dev (Keycloak) | `rider.demo@example.com`, `rider.other@example.com` | `driver.demo@example.com`, `driver.other@example.com` |
 
-Mật khẩu tài khoản dev nằm trong `keycloak/swiftride-realm.json` (biến `DEV_ACCOUNT_PASSWORD`). Rider có thể tự đăng ký tại trang Keycloak; tài khoản Driver chỉ tạo được trong Keycloak Admin Console.
+Mật khẩu tài khoản dev nằm trong `keycloak/swiftride-realm.json` (biến `DEV_ACCOUNT_PASSWORD`). Rider đăng ký ngay trong app (nút **Đăng ký**); tài khoản Driver chỉ tạo được trong Keycloak Admin Console.
 
 ## Chạy
 
@@ -40,6 +40,7 @@ Trên điện thoại thật, `localhost` là chính điện thoại: dùng IP L
 
 | | |
 |---|---|
+| Đăng ký | Chỉ app Rider. Form trong app (họ, tên, email, mật khẩu ≥ 12 ký tự, nhập lại) → `POST /api/auth/register` (Gateway, không cần token) → Gateway tạo user trong Keycloak bằng service account, user mới luôn là Rider. Xong thì nút Đăng nhập mở trang đăng nhập với email điền sẵn. Lỗi trùng email (409), sai dữ liệu (400), quá nhiều lần (429) hiện rõ trên form. |
 | Đăng nhập | Keycloak, client `swiftride-mobile`, Authorization Code + PKCE (S256). Web: chuyển hướng cả trang sang Keycloak rồi quay lại (không dùng popup vì trình duyệt điện thoại hay chặn); native: trình duyệt hệ thống. App không nhận mật khẩu. Token chỉ giữ trong bộ nhớ, tự refresh trước khi hết hạn (một request refresh tại một thời điểm). Đăng xuất thu hồi refresh token và thoát phiên SSO. App Rider chỉ nhận tài khoản có role Rider, app Driver chỉ nhận Driver. |
 | Bản đồ | Bản đồ OpenStreetMap thật bằng Leaflet: web dùng gói `leaflet`, native nhúng cùng mã đó trong `react-native-webview` (Leaflet 1.9.4 từ unpkg, có SRI). Chạm bản đồ để chọn điểm; tên địa chỉ lấy từ Nominatim (lỗi hoặc chậm thì hiện tọa độ). Có ô tìm địa chỉ (Nominatim, giới hạn Việt Nam) và 4 địa điểm chọn nhanh. Đường đi, quãng đường và thời gian lấy từ OSRM; OSRM lỗi thì ước tính đường chim bay × 1,3, 22 km/h và báo rõ trên màn hình. |
 | Rider | Chọn điểm đón/đến trên bản đồ → `POST /api/matching/quote` (bảng giá: cước theo km, theo phút, phụ thu cao điểm, phí phụ, giảm giá, VAT) → `POST /api/trips/` (kèm `idempotencyKey` và tọa độ đón/đến) → `POST /confirm-price` → theo dõi trạng thái, số tài xế đã từ chối / ngưỡng k → Saga thanh toán (`GET /api/trips/{id}/payment-saga`) → kết quả. Hủy được khi trạng thái cho phép. |
@@ -50,6 +51,17 @@ Trên điện thoại thật, `localhost` là chính điện thoại: dùng IP L
 Giá hiển thị đúng con số Pricing trả về, không nhân thêm. Vị trí tài xế vẫn là GPS giả lập (chọn trên bản đồ), chưa đọc GPS thiết bị và chưa dẫn đường. Dịch vụ OSM công cộng (tile, Nominatim, OSRM demo) chỉ phù hợp cho bài tập/demo: Nominatim giới hạn 1 request/giây, app chỉ gọi khi người dùng chạm hoặc bấm Tìm.
 
 Web preview gọi Gateway khác origin nên Gateway bật CORS cho `http://localhost:8081` và `http://localhost:8082` (`Cors:AllowedOrigins`). Keycloak đã có dữ liệu từ trước cần thêm `http://localhost:8082/*` vào redirect URI của client `swiftride-mobile` (hoặc tạo lại DB Keycloak) để app Driver bản web đăng nhập được.
+
+Đăng ký trong app cần client `swiftride-registration` (đã có trong `swiftride-realm.json`). Keycloak import realm từ trước thì thêm bằng lệnh sau (PowerShell, ở thư mục gốc, giữ nguyên dữ liệu), hoặc xóa volume `keycloak-postgres-data` để import lại:
+
+```powershell
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password keycloak-admin-dev
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh create clients -r swiftride -s clientId=swiftride-registration -s publicClient=false -s secret=swiftride-registration-dev-secret -s standardFlowEnabled=false -s directAccessGrantsEnabled=false -s serviceAccountsEnabled=true
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh add-roles -r swiftride --uusername service-account-swiftride-registration --cclientid realm-management --rolename manage-users
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh add-roles -r swiftride --rname default-roles-swiftride --rolename Rider
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update realms/swiftride -s registrationAllowed=false
+docker compose up -d --build api-gateway
+```
 
 ## Cấu trúc
 
@@ -84,6 +96,6 @@ npm run typecheck
 npm test
 ```
 
-Test bao phủ: ánh xạ trạng thái chuyến (giá trị lạ không bao giờ bị coi là đã xong), ước tính quãng đường, đường đi OSRM và dự phòng khi lỗi, rút gọn địa chỉ OSM, tìm địa chỉ, tọa độ chuyến từ server, hiển thị giá, đọc claim từ token Keycloak, cấu hình URL, client Gateway (giữ body/header, chặn đường dẫn lạ, lỗi HTTP rõ ràng, body rỗng của 202, không tự retry), nút chống bấm lặp và trạng thái bận, bản đồ có nhãn accessibility, và hai app tách biệt định danh. Luồng đầu-cuối được kiểm tra thủ công trên Docker (Rider đặt xe → Driver nhận → đón → trả → Saga Completed; hủy chuyến; đăng xuất).
+Test bao phủ: form đăng ký (thứ tự lỗi, gửi đúng field không kèm token/role, thông báo 409/400/429/503/mạng, không tự gửi lại), ánh xạ trạng thái chuyến (giá trị lạ không bao giờ bị coi là đã xong), ước tính quãng đường, đường đi OSRM và dự phòng khi lỗi, rút gọn địa chỉ OSM, tìm địa chỉ, tọa độ chuyến từ server, hiển thị giá, đọc claim từ token Keycloak, cấu hình URL, client Gateway (giữ body/header, chặn đường dẫn lạ, lỗi HTTP rõ ràng, body rỗng của 202, không tự retry), nút chống bấm lặp và trạng thái bận, bản đồ có nhãn accessibility, và hai app tách biệt định danh. Luồng đầu-cuối được kiểm tra thủ công trên Docker (Rider đặt xe → Driver nhận → đón → trả → Saga Completed; hủy chuyến; đăng xuất).
 
 `npm audit` còn báo cảnh báo phụ thuộc gián tiếp của Expo/Metro; không dùng `npm audit fix --force` để hạ Expo/React Native. Không đưa dev server ra Internet.

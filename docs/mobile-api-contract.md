@@ -8,16 +8,17 @@ Tai lieu mo ta code hien tai, khong coi API du kien la da co. HTTP/SignalR trans
 
 Token do Keycloak cap (realm `swiftride`, issuer `{KEYCLOAK_PUBLIC_URL}/realms/swiftride`, local `http://localhost:8180/realms/swiftride`). Gateway khong con /auth/*. Moi business HTTP request gui `Authorization: Bearer <access_token>`. Khong gui token qua query string cho HTTP API. Khong dung X-User-* lam danh tinh.
 
-App dung client public `swiftride-mobile` voi **Authorization Code + PKCE (S256)**, mo trang dang nhap/dang ky cua Keycloak trong trinh duyet he thong. Redirect URI hop le: `swiftride-rider://*`, `swiftride-driver://*`, `exp://*` (Expo Go), `http://localhost:8081/*` (web preview). Client nay khong cho password grant.
+App dung client public `swiftride-mobile` voi **Authorization Code + PKCE (S256)**, mo trang dang nhap cua Keycloak trong trinh duyet he thong. Dang ky Rider lam ngay trong app qua Gateway (`POST /api/auth/register`, khong can token); trang dang ky cua Keycloak da tat. Redirect URI hop le: `swiftride-rider://*`, `swiftride-driver://*`, `exp://*` (Expo Go), `http://localhost:8081/*` (web preview). Client nay khong cho password grant.
 
 | Viec | Endpoint (goc `/realms/swiftride/protocol/openid-connect`) | Ket qua |
 |---|---|---|
 | Dang nhap | GET /auth?client_id=swiftride-mobile&response_type=code&scope=openid&code_challenge=…&code_challenge_method=S256&redirect_uri=… | Redirect ve app kem `code` |
-| Dang ky | GET /registrations (cung tham so) | Tao user moi, luon chi co role Rider |
 | Doi code lay token | POST /token: grant_type=authorization_code, client_id, code, code_verifier, redirect_uri | 200: access_token, refresh_token, expires_in |
 | Lam moi token | POST /token: grant_type=refresh_token, client_id, refresh_token | 200: cap token moi; refresh token cu het hieu luc |
 | Danh tinh | GET /userinfo + Bearer | 200: sub, email, role[] |
 | Dang xuat | POST /logout: client_id, refresh_token | 204 |
+
+Dang ky (Gateway, khong can token): `POST /api/auth/register` body `{ "email", "password", "firstName", "lastName" }` -> 201 `{ "email", "role": "Rider" }`; 400 problem (`errors` theo field: mat khau 12-128 ky tu va khac email, ho/ten bat buoc); 409 email da ton tai; 429 qua nhieu lan; 503 Keycloak loi (gui lai co the nhan 409 neu user da duoc tao). Sau do dang nhap PKCE nhu tren, co the gui them `login_hint=<email>`.
 
 Access token song 15 phut. Chi cho mot refresh request chay tai mot thoi diem va thay ca cap token; refresh token cu bi tu choi (400 invalid_grant). Logout dong SignalR va xoa token tren client; access token da cap van co the hop le den expiry.
 

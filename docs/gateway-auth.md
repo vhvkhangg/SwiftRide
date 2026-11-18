@@ -18,17 +18,18 @@ Cấu hình nằm trong [keycloak/swiftride-realm.json](../keycloak/swiftride-re
 | Thành phần | Giá trị |
 |---|---|
 | Vai trò realm | `Rider`, `Driver`, `Admin` |
-| Default role khi tự đăng ký | chỉ `Rider` (composite `default-roles-swiftride`) |
+| Default role của user mới | chỉ `Rider`: role `default-roles-swiftride` khai báo trong `roles.realm` (Keycloak bỏ qua `composites` đặt dưới `defaultRole` khi import) |
 | Claim trong access token | `sub` (UUID user Keycloak), `email`, `role` (mảng vai trò realm), `aud` = `swiftride-api` |
 | Access token TTL | 15 phút; refresh token xoay vòng (`revokeRefreshToken`), không cho dùng lại |
 | Mật khẩu | tối thiểu 12 ký tự, khác username; brute-force protection bật |
-| Tự đăng ký | bật (email làm username); người dùng tự đăng ký luôn là Rider |
+| Đăng ký | trong app Rider, qua `POST /api/auth/register` của Gateway (xem dưới). Trang đăng ký của Keycloak tắt (`registrationAllowed: false`); email làm username; user mới luôn là Rider |
 
 Client OIDC:
 
 | Client | Loại | Luồng | Dùng cho |
 |---|---|---|---|
 | `swiftride-mobile` | public | Authorization Code + **PKCE S256**; không cho password grant | App Rider/Driver (redirect `swiftride-rider://*`, `swiftride-driver://*`, Expo `exp://*`, web preview `http://localhost:8081/*`) |
+| `swiftride-registration` | confidential (secret `REGISTRATION_CLIENT_SECRET`) | Client credentials; service account chỉ có `realm-management/manage-users` | Gateway tạo tài khoản Rider khi đăng ký trong app. Không đăng nhập người dùng được |
 | `swiftride-postman` | public | Password grant (Direct Access Grants) | **Chỉ dev/test**: Postman/Newman, `tests/System/messaging.py`, `tests/Gateway.Security/*`. Tắt client này ở production |
 
 Tài khoản demo (chỉ import ở môi trường dev; mật khẩu lấy từ `DEV_ACCOUNT_PASSWORD`, mặc định `SwiftRide-demo-2026!`):
@@ -51,13 +52,30 @@ Gốc: `{KEYCLOAK_PUBLIC_URL}/realms/swiftride/protocol/openid-connect`.
 |---|---|
 | Discovery | `GET /realms/swiftride/.well-known/openid-configuration` |
 | Đăng nhập (mobile) | `GET .../auth?client_id=swiftride-mobile&response_type=code&code_challenge=…&code_challenge_method=S256&redirect_uri=…` |
-| Đăng ký (mobile) | `GET .../registrations?client_id=swiftride-mobile&…` (trang đăng ký Keycloak) |
 | Đổi code / refresh / password grant (test) | `POST .../token` (form-urlencoded) |
 | Thông tin user | `GET .../userinfo` với Bearer token → `sub`, `email`, `role` |
 | Đăng xuất | `POST .../logout` với `client_id` + `refresh_token` → 204 |
 | Public keys | `GET .../certs` (JWKS) |
 
-Gateway không còn `/auth/register`, `/auth/login`, `/auth/me`, `/auth/refresh-token`, `/auth/revoke`, không còn AuthDb.
+Gateway không còn `/auth/login`, `/auth/me`, `/auth/refresh-token`, `/auth/revoke`, không còn AuthDb; Gateway không bao giờ nhận mật khẩu đăng nhập.
+
+### Đăng ký Rider trong app: `POST /api/auth/register`
+
+Endpoint duy nhất của Gateway không cần token. Body `{ "email", "password", "firstName", "lastName" }`.
+
+1. Gateway kiểm tra dữ liệu theo đúng chính sách realm (email hợp lệ, mật khẩu 12–128 ký tự và khác email, họ/tên 1–100 ký tự) → sai thì 400 kèm `errors`.
+2. Lấy token client credentials của `swiftride-registration`, gọi `POST /admin/realms/swiftride/users` (Keycloak lưu mật khẩu; Gateway không lưu, không ghi log).
+3. Request tạo user không có trường role/group: role chỉ đến từ default role, nên không thể đăng ký thành Driver/Admin.
+
+| Kết quả | HTTP |
+|---|---|
+| Tạo xong | 201 `{ "email", "role": "Rider" }` |
+| Email đã có | 409 problem `detail: "Email này đã được đăng ký."` |
+| Dữ liệu sai / Keycloak từ chối mật khẩu | 400 problem |
+| Quá 10 lần / 15 phút / IP | 429 (rate limit; trong Docker mọi client đi qua cùng IP bridge nên giới hạn gần như toàn cục) |
+| Keycloak lỗi, chưa cấu hình secret | 503. Nếu lỗi xảy ra sau khi Keycloak đã tạo user, gửi lại sẽ nhận 409 |
+
+Sau khi đăng ký, app mở trang đăng nhập (PKCE) với `login_hint` = email vừa tạo. Cấu hình: `Registration:KeycloakUrl` (trong Compose `http://keycloak:8080`), `Registration:ClientSecret`, `Registration:PermitsPerWindow`. Keycloak đã có dữ liệu từ trước cần tạo client + quyền này (xem `mobile/README.md`).
 
 ## Kiểm tra token ở Gateway và service
 

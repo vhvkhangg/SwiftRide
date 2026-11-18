@@ -3,7 +3,7 @@
   "displayName": "SwiftRide",
   "enabled": true,
   "sslRequired": "external",
-  "registrationAllowed": true,
+  "registrationAllowed": false,
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -22,18 +22,26 @@
   "passwordPolicy": "length(12) and notUsername",
   "roles": {
     "realm": [
-      { "name": "Rider", "description": "Hanh khach; cap mac dinh khi tu dang ky" },
+      { "name": "Rider", "description": "Hanh khach; cap mac dinh khi dang ky trong app" },
       { "name": "Driver", "description": "Tai xe; chi cap qua quan tri" },
       { "name": "Admin", "description": "Quan tri; refund va thao tac van hanh" },
       { "name": "offline_access", "description": "${role_offline-access}" },
-      { "name": "uma_authorization", "description": "${role_uma_authorization}" }
+      { "name": "uma_authorization", "description": "${role_uma_authorization}" },
+      {
+        "name": "default-roles-swiftride",
+        "description": "Granted to every new user (in-app sign-up): Rider only. Keycloak ignores composites under defaultRole on import, so they are declared here.",
+        "composite": true,
+        "composites": {
+          "realm": ["Rider", "offline_access", "uma_authorization"],
+          "client": { "account": ["view-profile", "manage-account"] }
+        }
+      }
     ]
   },
   "defaultRole": {
     "name": "default-roles-swiftride",
-    "description": "Self-registered users become Riders only",
-    "composite": true,
-    "composites": { "realm": ["Rider"] }
+    "description": "Users created by in-app sign-up become Riders only",
+    "composite": true
   },
   "clients": [
     {
@@ -76,6 +84,21 @@
       ]
     },
     {
+      "clientId": "swiftride-registration",
+      "name": "SwiftRide Gateway - in-app Rider sign-up",
+      "description": "Confidential service account used only by the API Gateway to create Rider accounts (realm-management manage-users).",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${REGISTRATION_CLIENT_SECRET:swiftride-registration-dev-secret}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["basic"]
+    },
+    {
       "clientId": "swiftride-postman",
       "name": "SwiftRide grading and system tests (dev only)",
       "description": "Password grant for Postman/Newman and automated tests. Disable outside dev/test.",
@@ -104,6 +127,12 @@
     }
   ],
   "users": [
+    {
+      "username": "service-account-swiftride-registration",
+      "enabled": true,
+      "serviceAccountClientId": "swiftride-registration",
+      "clientRoles": { "realm-management": ["manage-users"] }
+    },
     {
       "username": "rider.demo@example.com",
       "email": "rider.demo@example.com",

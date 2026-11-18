@@ -220,7 +220,7 @@ sequenceDiagram
     S-->>App: 200 / 403 / 404
 ```
 
-- Vai trò được cấp **trong Keycloak**, không có API công khai nào để tự nâng quyền. Người tự đăng ký luôn chỉ là Rider.
+- Vai trò được cấp **trong Keycloak**, không có API công khai nào để tự nâng quyền. Đăng ký làm trong app Rider qua `POST /api/auth/register` của Gateway: Gateway dùng service account `swiftride-registration` (chỉ quyền `manage-users`) gọi Keycloak Admin API; người đăng ký luôn chỉ là Rider.
 - Service **không tin** header `X-User-*`. Gọi thẳng vào service mà không có JWT hợp lệ sẽ nhận 401.
 - Gọi giữa các service dùng token nội bộ riêng (HS256, issuer `SwiftRide.Services`, sống 1 phút), không dùng chung với token người dùng.
 

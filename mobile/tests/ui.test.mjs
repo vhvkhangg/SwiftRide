@@ -148,3 +148,50 @@ test('reverse geocoding falls back to coordinates; search keeps only valid point
   assert.deepEqual(await geo.searchPlaces('nhà hát'), [{ latitude: 10.77, longitude: 106.7, address: 'Nhà hát Thành phố, Đồng Khởi' }]);
   assert.deepEqual(await geo.searchPlaces('   '), []);
 });
+
+// In-app Rider sign-up (shared/api/register.ts -> POST /api/auth/register).
+const { problemDetail } = load(resolve(shared, 'gateway.ts'));
+const { emptyRegistration, registerRider, registrationError } = load(resolve(shared, 'api/register.ts'));
+const valid = { lastName: 'Nguyễn', firstName: 'An', email: ' an.nguyen@example.com ', password: 'Mat-khau-du-dai-1', confirm: 'Mat-khau-du-dai-1' };
+
+test('sign-up form follows the server rules and reports the first problem in form order', () => {
+  assert.equal(registrationError(valid), '');
+  assert.match(registrationError(emptyRegistration), /họ/);
+  assert.match(registrationError({ ...valid, firstName: ' ' }), /tên/);
+  assert.match(registrationError({ ...valid, email: 'an@local' }), /Email/);
+  assert.match(registrationError({ ...valid, password: 'short', confirm: 'short' }), /12/);
+  assert.match(registrationError({ ...valid, email: 'long.enough@example.com', password: 'LONG.ENOUGH@example.com', confirm: 'LONG.ENOUGH@example.com' }), /trùng email/);
+  assert.match(registrationError({ ...valid, confirm: 'Mat-khau-khac-12' }), /không khớp/);
+});
+
+test('sign-up posts only the account fields to the Gateway, without a token or role', async context => {
+  const calls = [];
+  context.mock.method(globalThis, 'fetch', async (...args) => { calls.push(args); return Response.json({ email: 'an.nguyen@example.com', role: 'Rider' }, { status: 201 }); });
+  assert.equal(await registerRider('http://localhost:5100', valid), 'an.nguyen@example.com');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'http://localhost:5100/api/auth/register');
+  assert.equal(calls[0][1].headers.Authorization, undefined);
+  assert.deepEqual(JSON.parse(calls[0][1].body), { email: 'an.nguyen@example.com', password: 'Mat-khau-du-dai-1', firstName: 'An', lastName: 'Nguyễn' });
+});
+
+test('sign-up errors are explained: duplicate email, server validation, rate limit, network', async context => {
+  const answer = { status: 409, body: '' };
+  const fetch = context.mock.method(globalThis, 'fetch', async () => new Response(answer.body, { status: answer.status }));
+  await assert.rejects(registerRider('http://localhost:5100', valid), /đã được đăng ký/);
+  Object.assign(answer, { status: 400, body: JSON.stringify({ title: 'x', errors: { password: ['Mật khẩu cần từ 12 đến 128 ký tự.'] } }) });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /Mật khẩu cần từ 12/);
+  Object.assign(answer, { status: 429, body: '' });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /quá nhiều lần/);
+  Object.assign(answer, { status: 503, body: JSON.stringify({ detail: 'Chưa tạo được tài khoản lúc này. Thử lại sau ít phút.' }) });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /Thử lại sau/);
+  fetch.mock.mockImplementation(async () => { throw new TypeError('Failed to fetch'); });
+  await assert.rejects(registerRider('http://localhost:5100', valid), /đã được tạo/);
+  assert.equal(fetch.mock.callCount(), 5, 'never retried automatically');
+});
+
+test('problem details: detail first, then the first validation error, otherwise nothing', () => {
+  assert.equal(problemDetail('{"detail":"Email này đã được đăng ký."}'), 'Email này đã được đăng ký.');
+  assert.equal(problemDetail('{"errors":{"email":["Email không hợp lệ."]}}'), 'Email không hợp lệ.');
+  assert.equal(problemDetail('not json'), undefined);
+  assert.equal(problemDetail(''), undefined);
+});
