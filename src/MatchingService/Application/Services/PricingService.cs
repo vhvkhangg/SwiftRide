@@ -34,7 +34,7 @@ public sealed class PricingService(
         var operating = CostPerKm * request.Distance + CostPerMinute * request.EstimatedTime;
         var strategy = SelectStrategy(discountRate, surgeMultiplier);
         var total = strategy.CalculatePrice(context);
-        var discount = operating * surgeMultiplier * (1m - promotionFactor);
+        var discount = (operating * surgeMultiplier + Toll) * (1m - promotionFactor);
         var tax = Math.Max(0m, total - ((operating * surgeMultiplier + Toll) * promotionFactor));
 
         return new QuoteResponse(

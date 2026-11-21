@@ -51,6 +51,8 @@ public sealed class MongoDriverRepositoryReservationTests
         finally
         {
             await collection.DeleteOneAsync(driver => driver.DriverId == driverId, ct);
+            await database.GetCollection<MatchingOutboxMessage>("matching_outbox")
+                .DeleteManyAsync(message => message.TripId == tripId, ct);
         }
     }
 
@@ -79,6 +81,8 @@ public sealed class MongoDriverRepositoryReservationTests
         finally
         {
             await collection.DeleteOneAsync(driver => driver.DriverId == driverId, ct);
+            await database.GetCollection<MatchingOutboxMessage>("matching_outbox")
+                .DeleteManyAsync(message => message.TripId == tripId, ct);
         }
     }
 
@@ -108,6 +112,8 @@ public sealed class MongoDriverRepositoryReservationTests
         finally
         {
             await collection.DeleteOneAsync(driver => driver.DriverId == driverId, ct);
+            await database.GetCollection<MatchingOutboxMessage>("matching_outbox")
+                .DeleteManyAsync(message => message.TripId == tripId, ct);
         }
     }
 
@@ -149,6 +155,8 @@ public sealed class MongoDriverRepositoryReservationTests
         finally
         {
             await collection.DeleteManyAsync(Builders<DriverLocation>.Filter.In(driver => driver.DriverId, drivers), ct);
+            await database.GetCollection<MatchingOutboxMessage>("matching_outbox")
+                .DeleteManyAsync(Builders<MatchingOutboxMessage>.Filter.In(message => message.TripId, trips), ct);
         }
     }
 }

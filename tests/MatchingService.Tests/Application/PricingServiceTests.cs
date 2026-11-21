@@ -1,4 +1,5 @@
 using MongoDB.Driver;
+using Microsoft.Extensions.Options;
 using Moq;
 using SwiftRide.MatchingService.Application.DTOs;
 using SwiftRide.MatchingService.Application.Services;
@@ -69,6 +70,32 @@ public sealed class PricingServiceTests
     }
 
     [Fact]
+    public async Task CalculateAsync_IncludesTollInPromoDiscountBreakdown()
+    {
+        var now = new DateTime(2026, 10, 23, 3, 0, 0, DateTimeKind.Utc);
+        var service = CreateService(
+            now,
+            surgeRule: null,
+            promoCode: new PromoCodeDocument
+            {
+                Code = "SWIFTRIDE2026",
+                DiscountRate = 0.1m,
+                IsActive = true,
+                ExpiredAt = now.AddDays(1)
+            },
+            toll: 20m);
+
+        var result = await service.CalculateAsync(
+            new QuoteRequest(10m, 20m, "Car", "SWIFTRIDE2026"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(18m, result.Discount);
+        Assert.Equal(16.2m, result.Tax);
+        Assert.Equal(178.2m, result.Total);
+        Assert.Equal(result.Total, result.Distance + result.Time + result.Surge + result.Toll - result.Discount + result.Tax);
+    }
+
+    [Fact]
     public async Task CalculateAsync_IgnoresInvalidPromoCode()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -132,7 +159,8 @@ public sealed class PricingServiceTests
     private static PricingService CreateService(
         DateTime utcNow,
         SurgeRuleDocument? surgeRule,
-        PromoCodeDocument? promoCode = null)
+        PromoCodeDocument? promoCode = null,
+        decimal toll = 0m)
     {
         var database = new Mock<IMongoDatabase>();
         database
@@ -146,6 +174,10 @@ public sealed class PricingServiceTests
                 It.IsAny<MongoCollectionSettings>()))
             .Returns(CreateCollection(promoCode));
 
+        var pricingOptions = new Mock<IOptionsMonitor<PricingOptions>>();
+        pricingOptions.SetupGet(item => item.CurrentValue)
+            .Returns(new PricingOptions { Toll = toll });
+
         return new PricingService(
             [
                 new StandardPricingStrategy(),
@@ -153,7 +185,8 @@ public sealed class PricingServiceTests
                 new PromoPricingStrategy()
             ],
             new StubDateTimeProvider(utcNow),
-            database.Object);
+            database.Object,
+            pricingOptions.Object);
     }
 
     private static IMongoCollection<T> CreateCollection<T>(T? document)

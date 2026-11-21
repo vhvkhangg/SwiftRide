@@ -60,6 +60,7 @@ services:
 
   matching-mongodb:
     image: mongo:8
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     environment:
       GLIBC_TUNABLES: glibc.pthread.rseq=1
     ports:
@@ -67,10 +68,14 @@ services:
     volumes:
       - matching-mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval 'try { if (db.hello().isWritablePrimary) quit(0); } catch (e) {} try { rs.status(); } catch (e) { rs.initiate({_id: "rs0", members: [{_id: 0, host: "matching-mongodb:27017"}]}); } quit(1);'
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 10
+      start_period: 10s
 
   payment-postgres:
     image: postgres:18
@@ -134,7 +139,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ServiceAuth__ServiceName: matching-service
       Services__TripService__BaseUrl: http://trip-service:8080/
-      ConnectionStrings__MatchDb: mongodb://matching-mongodb:27017/${MATCH_DB_NAME:-swiftride_matching}
+      ConnectionStrings__MatchDb: mongodb://matching-mongodb:27017/${MATCH_DB_NAME:-swiftride_matching}?replicaSet=rs0
       RabbitMq__Host: rabbitmq
       RabbitMq__Port: 5672
       RabbitMq__VirtualHost: ${RABBITMQ_VHOST:-swiftride}
