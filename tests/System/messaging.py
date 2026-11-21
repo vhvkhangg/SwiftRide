@@ -484,7 +484,11 @@ def main():
             for name, service in (("TRIP", "trip-postgres"), ("PAYMENT", "payment-postgres")):
                 env[f"SWIFTRIDE_{name}_TEST_DB"] = (f"Host=127.0.0.1;Port={stack.port(service,5432)};"
                     f"Database={stack.env[name+'_DB_NAME']};Username=swiftride;Password={stack.env[name+'_DB_PASSWORD']}")
-            env["SWIFTRIDE_MATCHING_TEST_DB"] = f"mongodb://127.0.0.1:{stack.port('matching-mongodb',27017)}/swiftride_matching_test"
+            # Host-side tests must not discover the replica-set member through Docker-only DNS.
+            env["SWIFTRIDE_MATCHING_TEST_DB"] = (
+                f"mongodb://127.0.0.1:{stack.port('matching-mongodb',27017)}"
+                "/swiftride_matching_test?replicaSet=rs0&directConnection=true"
+            )
             for project in ("TripService", "PaymentService", "MatchingService"):
                 command = [args.dotnet, "test", "--project", f"tests/{project}.Tests/{project}.Tests.csproj", "-c", "Release", "--no-build"]
                 if args.artifacts_path:
