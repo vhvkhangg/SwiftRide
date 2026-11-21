@@ -164,32 +164,66 @@ public sealed class MongoDriverRepository(
         var owner = Builders<DriverLocation>.Filter.And(
             Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, tripId),
             Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationAttempt, attempt));
+        if (!Guid.TryParseExact(driverId, "D", out var driverGuid) || driverGuid == Guid.Empty)
+            throw new ArgumentException("DriverId không hợp lệ.", nameof(driverId));
+        driverId = driverGuid.ToString("D");
         var available = Builders<DriverLocation>.Filter.And(
             ValidDriverIdFilter,
             Builders<DriverLocation>.Filter.Ne(driver => driver.IsOnline, false),
             Builders<DriverLocation>.Filter.Gte(driver => driver.UpdatedAt, now - DriverLocationValidity),
             Builders<DriverLocation>.Filter.Eq(driver => driver.IsAvailable, true),
             Builders<DriverLocation>.Filter.Eq(driver => driver.ReservationTripId, null));
-        UpdateResult result;
+
+        var outboxMessage = new MatchingOutboxMessage
+        {
+            Id = MatchingOutboxMessage.CreateId(tripId, attempt),
+            MessageId = Guid.NewGuid(),
+            Type = MatchingOutboxMessage.DriverFoundType,
+            TripId = tripId,
+            Attempt = attempt,
+            DriverId = driverGuid,
+            OccurredAtUtc = now,
+            NextAttemptAtUtc = now,
+            CreatedAtUtc = now
+        };
+        using var session = await database.Client.StartSessionAsync(cancellationToken: cancellationToken);
         try
         {
-            result = await collection.UpdateOneAsync(
-                Builders<DriverLocation>.Filter.And(
-                    Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
-                    available),
-                Builders<DriverLocation>.Update
-                    .Set(driver => driver.IsAvailable, false)
-                    .Set(driver => driver.ReservationTripId, tripId)
-                    .Set(driver => driver.ReservationAttempt, attempt)
-                    .Set(driver => driver.ReservationExpiresAtUtc, expiresAtUtc),
-                cancellationToken: cancellationToken);
+            return await session.WithTransactionAsync(async (transaction, ct) =>
+            {
+                var result = await collection.UpdateOneAsync(
+                    transaction,
+                    Builders<DriverLocation>.Filter.And(
+                        Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId),
+                        available),
+                    Builders<DriverLocation>.Update
+                        .Set(driver => driver.IsAvailable, false)
+                        .Set(driver => driver.ReservationTripId, tripId)
+                        .Set(driver => driver.ReservationAttempt, attempt)
+                        .Set(driver => driver.ReservationExpiresAtUtc, expiresAtUtc),
+                    cancellationToken: ct);
+
+                if (result.MatchedCount > 0)
+                {
+                    await database.GetCollection<MatchingOutboxMessage>("matching_outbox")
+                        .InsertOneAsync(transaction, outboxMessage, cancellationToken: ct);
+                    return true;
+                }
+
+                return await collection.Find(
+                        transaction,
+                        Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId) & owner)
+                    .AnyAsync(ct);
+            }, cancellationToken: cancellationToken);
         }
         catch (MongoWriteException exception) when (exception.WriteError.Category == ServerErrorCategory.DuplicateKey)
         {
             return false;
         }
-        return result.MatchedCount > 0 || await collection.Find(owner &
-            Builders<DriverLocation>.Filter.Eq(driver => driver.DriverId, driverId)).AnyAsync(cancellationToken);
+        catch (MongoCommandException exception) when (exception.Code == 11000)
+        {
+            return false;
+        }
     }
 
     public async Task<bool> ReleaseReservationAsync(

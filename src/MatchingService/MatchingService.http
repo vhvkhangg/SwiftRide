@@ -1,31 +1,26 @@
 @baseUrl = http://localhost:5100
+@keycloakUrl = http://localhost:8180
 @password = SwiftRide-demo-2026!
 
 ### 1. Lấy Token cho Rider
 # @name loginRider
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
+POST {{keycloakUrl}}/realms/swiftride/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
 
-{
-  "email": "rider.demo@example.com",
-  "password": "{{password}}"
-}
+grant_type=password&client_id=swiftride-postman&username=rider.demo@example.com&password={{password}}
 
-### Gán token của Rider vào biến
-@riderToken = 
+### Token Rider lấy tự động từ phản hồi login
+@riderToken = {{loginRider.response.body.$.access_token}}
 
 ### 2. Lấy Token cho Driver
 # @name loginDriver
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
+POST {{keycloakUrl}}/realms/swiftride/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
 
-{
-  "email": "driver.demo@example.com",
-  "password": "{{password}}"
-}
+grant_type=password&client_id=swiftride-postman&username=driver.demo@example.com&password={{password}}
 
-### Gán token của Driver vào biến
-@driverToken = 
+### Token Driver lấy tự động từ phản hồi login
+@driverToken = {{loginDriver.response.body.$.access_token}}
 
 ### Health Check (Không cần Auth)
 GET {{baseUrl}}/health
