@@ -75,7 +75,7 @@ Endpoint duy nhất của Gateway không cần token. Body `{ "email", "password
 | Quá 10 lần / 15 phút / IP | 429 (rate limit; trong Docker mọi client đi qua cùng IP bridge nên giới hạn gần như toàn cục) |
 | Keycloak lỗi, chưa cấu hình secret | 503. Nếu lỗi xảy ra sau khi Keycloak đã tạo user, gửi lại sẽ nhận 409 |
 
-Sau khi đăng ký, app mở trang đăng nhập (PKCE) với `login_hint` = email vừa tạo. Cấu hình: `Registration:KeycloakUrl` (trong Compose `http://keycloak:8080`), `Registration:ClientSecret`, `Registration:PermitsPerWindow`. Keycloak đã có dữ liệu từ trước cần tạo client + quyền này (xem `mobile/README.md`).
+Sau khi đăng ký, app mở trang đăng nhập (PKCE) với `login_hint` = email vừa tạo. Cấu hình: `Registration:KeycloakUrl` (trong Compose `http://keycloak:8080`), `Registration:ClientSecret`, `Registration:PermitsPerWindow`. Keycloak đã có dữ liệu từ trước được service một lần `keycloak-setup` (`keycloak/ensure-registration.sh`) bổ sung client, secret và quyền này mỗi lần `docker compose up`; Gateway chờ bước này xong mới chạy.
 
 ## Kiểm tra token ở Gateway và service
 

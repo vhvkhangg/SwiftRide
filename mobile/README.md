@@ -52,16 +52,7 @@ Giá hiển thị đúng con số Pricing trả về, không nhân thêm. Vị t
 
 Web preview gọi Gateway khác origin nên Gateway bật CORS cho `http://localhost:8081` và `http://localhost:8082` (`Cors:AllowedOrigins`). Keycloak đã có dữ liệu từ trước cần thêm `http://localhost:8082/*` vào redirect URI của client `swiftride-mobile` (hoặc tạo lại DB Keycloak) để app Driver bản web đăng nhập được.
 
-Đăng ký trong app cần client `swiftride-registration` (đã có trong `swiftride-realm.json`). Keycloak import realm từ trước thì thêm bằng lệnh sau (PowerShell, ở thư mục gốc, giữ nguyên dữ liệu), hoặc xóa volume `keycloak-postgres-data` để import lại:
-
-```powershell
-docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password keycloak-admin-dev
-docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh create clients -r swiftride -s clientId=swiftride-registration -s publicClient=false -s secret=swiftride-registration-dev-secret -s standardFlowEnabled=false -s directAccessGrantsEnabled=false -s serviceAccountsEnabled=true
-docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh add-roles -r swiftride --uusername service-account-swiftride-registration --cclientid realm-management --rolename manage-users
-docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh add-roles -r swiftride --rname default-roles-swiftride --rolename Rider
-docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update realms/swiftride -s registrationAllowed=false
-docker compose up -d --build api-gateway
-```
+Đăng ký trong app cần client `swiftride-registration` (có trong `swiftride-realm.json`). Keycloak đã import realm từ trước sẽ không tự có client này (`--import-realm` bỏ qua realm đã tồn tại), nên Compose có service một lần `keycloak-setup` (script `keycloak/ensure-registration.sh`): mỗi lần `docker compose up` nó tạo client nếu thiếu, đồng bộ secret với Gateway, cấp `manage-users`, thêm Rider vào default role và tắt trang đăng ký của Keycloak. Gateway chỉ khởi động sau khi bước này thành công. Nếu đăng ký trả 503, xem `docker compose logs keycloak-setup api-gateway`.
 
 ## Cấu trúc
 
