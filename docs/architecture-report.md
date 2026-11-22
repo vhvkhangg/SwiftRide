@@ -197,7 +197,7 @@ Không có route public nào dẫn vào `/internal/*`. Hệ thống dùng **mộ
 | Service | CSDL | Dữ liệu chính | Lý do |
 |---|---|---|---|
 | Trip | **PostgreSQL** (`trip-postgres`) | `Trips`, `DriverInvitations`, bảng Outbox/Inbox của MassTransit | Trạng thái chuyến cần ACID, ràng buộc unique (một lời mời cho mỗi `(TripId, Attempt)`), optimistic concurrency bằng `xmin` |
-| Matching & Pricing | **MongoDB** (`matching-mongodb`) | `drivers` (GeoJSON + chỉ mục `2dsphere`), `surge_rules`, `promo_codes` | Vị trí tài xế ghi/đọc liên tục, cần geo-query `$nearSphere`; cập nhật nguyên tử bằng `FindOneAndUpdate` để giữ chỗ |
+| Matching & Pricing | **MongoDB** (`matching-mongodb`, replica set `rs0`) | `drivers` (GeoJSON + chỉ mục `2dsphere`), `surge_rules`, `promo_codes`, outbox của Matching | Vị trí tài xế ghi/đọc liên tục, cần geo-query `$nearSphere`; cập nhật nguyên tử bằng `FindOneAndUpdate` để giữ chỗ; replica set để giữ chỗ tài xế và ghi outbox trong cùng một transaction |
 | Payment | **PostgreSQL** (`payment-postgres`) | `Payments`, `LedgerEntries`, Outbox/Inbox | Sổ cái kép cần transaction mạnh, unique theo idempotency key, phục vụ kiểm toán |
 
 **Lệch so với đề:** đề gợi ý SQL Server cho Trip, nhóm dùng PostgreSQL. Đề cho phép "dùng cùng một loại CSDL nhưng tách schema/database theo service". Ở đây Trip và Payment chạy hai **instance** PostgreSQL riêng, Matching dùng MongoDB. Hệ thống vẫn là polyglot persistence (quan hệ + document) nhưng chỉ phải vận hành hai công nghệ CSDL thay vì ba.
@@ -476,7 +476,7 @@ Lợi ích thấy được ngay trong kiểm thử: `TripApplicationServiceTests
 | **Observer / Pub-Sub** | Behavioral | Sự kiện domain qua RabbitMQ; SignalR đẩy `tripChanged`/`driverInvitation` | `SwiftRide.Messaging`, `TripNotificationHub` |
 | **API Gateway** | Architectural | Một điểm vào cho client (YARP) | `src/ApiGateway` |
 | **Saga (orchestration)** | Architectural | Điều phối thanh toán sau trả khách: gửi lệnh, theo dõi kết quả, timeout, hoàn tiền bù trừ (mục 9.2) | `src/TripService/Application/Sagas/` (`TripPaymentStateMachine`) |
-| **Transactional Outbox / Inbox** | Architectural | Ghi dữ liệu và message trong cùng transaction; chống xử lý trùng | MassTransit EF Outbox (Trip, Payment), migration `AddTripOutbox`, `AddPaymentConsumerOutbox` |
+| **Transactional Outbox / Inbox** | Architectural | Ghi dữ liệu và message trong cùng transaction; chống xử lý trùng | MassTransit EF Outbox (Trip, Payment), migration `AddTripOutbox`, `AddPaymentConsumerOutbox`; Matching dùng outbox riêng trên MongoDB (`MongoMatchingOutboxRepository` + `MatchingOutboxDispatcher`) |
 | **Idempotent Consumer** | Integration | Message trùng không tạo payment hay ledger thứ hai | `PaymentApplicationService`, unique index idempotency key |
 | **Dependency Injection** | Creational | Gắn cài đặt cụ thể vào abstraction | `Program.cs` của mỗi service |
 | **Factory** | Creational | Tạo đối tượng `PaymentMethod` (Wallet/Card) theo trường `PaymentMethod` của lệnh thanh toán | `src/PaymentService/Application/PaymentMethods/PaymentMethods.cs` (`PaymentMethodFactory`) |
@@ -551,13 +551,15 @@ SwiftRide/
 │   ├── SwiftRide.Messaging.Setup/ # Khởi tạo topology RabbitMQ trước khi service chạy
 │   └── Shared/ServiceSecurity.cs  # Xác thực token Keycloak + token nội bộ
 ├── keycloak/swiftride-realm.json  # Realm, role, client, user demo
+├── keycloak/ensure-registration.sh # keycloak-setup: bổ sung client đăng ký cho realm đã import từ trước
 ├── mobile/                        # App Rider và Driver (React Native/Expo)
 ├── tests/
 │   ├── TripService.Tests/  MatchingService.Tests/  PaymentService.Tests/   # xUnit + Moq
+│   ├── ApiGateway.Tests/          # Đăng ký Rider qua Keycloak Admin API
 │   ├── Shared/TestOidcIssuer.cs   # Giả lập Keycloak (RS256, JWKS) trong test
 │   ├── System/                    # Kịch bản recovery trên stack Docker thật
 │   └── Gateway.Security/          # Nghiệm thu Gateway + Keycloak + SignalR
-├── postman/                       # Collection chấm API (73 request) + environment
+├── postman/                       # Collection chấm API (78 request) + environment
 ├── docs/                          # Tài liệu kiến trúc, auth, messaging, kết quả kiểm thử
 ├── docker-compose.yml
 └── SwiftRide.sln
@@ -591,7 +593,7 @@ Chi phí phải trả cho phân tán, và cách nhóm xử lý:
 
 - **Strong consistency trong một service:** đổi trạng thái chuyến và ghi message được thực hiện trong cùng transaction PostgreSQL (`ITripUnitOfWork`). Tranh chấp được chặn bằng optimistic concurrency (`xmin` cho Trip, `Version` cho Payment).
 - **Eventual consistency giữa các service:** đi qua command/event trên RabbitMQ.
-- **Transactional Outbox:** dropoff ghi `PaymentPending` và `ProcessPaymentV1` vào Outbox cùng một commit; worker của MassTransit gửi message sau. Kịch bản kill Trip service hoặc ngắt broker ngay sau commit vẫn giao message đúng một lần (`dropoff-disconnect-restart`).
+- **Transactional Outbox:** dropoff ghi `PaymentPending` và `ProcessPaymentV1` vào Outbox cùng một commit; worker của MassTransit gửi message sau. Kịch bản kill Trip service hoặc ngắt broker ngay sau commit vẫn giao message đúng một lần (`dropoff-disconnect-restart`). Matching Service cũng dùng outbox (trên MongoDB replica set): giữ chỗ tài xế và message tìm tài xế được ghi trong cùng một transaction MongoDB, rồi `MatchingOutboxDispatcher` gửi lên RabbitMQ.
 - **Consumer idempotent:** RabbitMQ giao *at least once*. Payment Inbox chống trùng theo MessageId trong 24 giờ, và unique index trên idempotency key chặn trùng theo nghiệp vụ (`duplicate-payment`: hai lần gửi chỉ tạo một payment và hai dòng ledger).
 - **Retry và dead-letter:**
   - Lỗi tạm thời được retry 1s, 3s, 5s.
@@ -662,12 +664,13 @@ Saga không thay thế transaction nội bộ hay Outbox; nó được xây **tr
 
 | Tầng | Công cụ | Phạm vi | Kết quả gần nhất |
 |---|---|---|---|
-| Unit / HTTP cục bộ | xUnit v3 + Moq | Domain, application, endpoint security (token giả, sai khóa, sai issuer/audience), Gateway thật + SignalR | 174/174 pass |
+| Unit / HTTP cục bộ | xUnit v3 + Moq | Domain, application, endpoint security (token giả, sai khóa, sai issuer/audience), Gateway thật + SignalR, đăng ký Rider, phương thức thanh toán Wallet/Card | 249 test: 220 pass, 29 skip (cần PostgreSQL/MongoDB thật, chạy ở job `integration`), 0 fail |
 | Integration CSDL | xUnit + PostgreSQL/MongoDB thật | Repository, concurrency, ledger, reservation | Pass trong system suite |
 | System / recovery | `tests/System/messaging.py` | 25 kịch bản: topology, broker restart, message trùng, kill service giữa chừng, PostgreSQL/Mongo restart, payment bị từ chối, replay lỗi, nâng cấp volume | 25/25 pass |
 | Nghiệm thu Gateway + Keycloak | `tests/Gateway.Security/task1.ps1` | Token qua restart Gateway/Keycloak, readiness, logout, 61 kiểm tra HTTP + SignalR | Pass |
-| Chấm API | Postman/Newman (`postman/`) | 73 request: đăng nhập Keycloak, token giả, vòng đời chuyến, reject → đổi tài xế, thanh toán, refund Admin, hủy, refresh/logout | 146/146 assertion pass |
-| CI | GitHub Actions (`.github/workflows/ci.yml`) | Build, unit test, system suite, nghiệm thu Gateway | Chạy khi push lên `main` và trên mỗi pull request |
+| Chấm API | Postman/Newman (`postman/`) | 78 request: đăng ký Rider trong app, đăng nhập Keycloak, token giả, vòng đời chuyến, chọn phương thức (chuyến chính trả bằng Card; `Cash` bị 400), reject → đổi tài xế, thanh toán, refund Admin, hủy, refresh/logout | 160/160 assertion pass |
+| App mobile | `node --test` + TypeScript | Trạng thái chuyến, giá, claim token, client Gateway, form đăng ký, bản đồ/định tuyến, phương thức thanh toán | 23/23 pass; typecheck sạch |
+| CI | GitHub Actions (`.github/workflows/ci.yml`) | 3 job: `unit` (build, unit test, kiểm tra script Postman), `integration` (system suite + nghiệm thu Gateway), `postman` (dựng full stack, chạy Newman) | Chạy khi push lên `main` và trên mỗi pull request; xanh ở PR #45, #46 |
 
 Hướng dẫn chạy: [README.md](../README.md), [postman/README.md](../postman/README.md), [messaging.md](messaging.md), [gateway-docker-test.md](gateway-docker-test.md).
 
@@ -678,9 +681,9 @@ Hướng dẫn chạy: [README.md](../README.md), [postman/README.md](../postman
 | Hạn chế hiện tại | Hướng phát triển |
 |---|---|
 | Chưa có OpenTelemetry (trace/metric phân tán) | Thêm OpenTelemetry SDK cho ASP.NET Core, HttpClient, MassTransit; xuất ra Jaeger/Prometheus; theo dõi tỉ lệ đặt xe thành công, thời gian matching, tỉ lệ thanh toán lỗi, độ dài hàng đợi |
-| Thanh toán là ledger mô phỏng | Tích hợp cổng thanh toán (chỉ lưu token do cổng cấp), thay `CardPaymentMethod` mô phỏng bằng adapter tới cổng thật; cho rider chọn phương thức trong app |
+| Thanh toán là ledger mô phỏng; Rider đã chọn được Ví/Thẻ trong app nhưng thẻ là cổng giả lập (hạn mức 5.000.000 VND) | Tích hợp cổng thanh toán thật (chỉ lưu token do cổng cấp), thay `CardPaymentMethod` mô phỏng bằng adapter tới cổng; thêm màn quản lý thẻ đã lưu |
 | Phí phụ (toll) = 0, `RideType` chưa ảnh hưởng giá | Lấy dữ liệu trạm thu phí, thêm hệ số theo loại xe (thêm Strategy mới, không sửa lớp cũ) |
 | App mobile cập nhật trạng thái bằng polling 2 giây; GPS tài xế giả lập | Nối SignalR `tripChanged`/`driverInvitation` để nhận sự kiện tức thì; đọc GPS thiết bị (`expo-location`) và gửi vị trí liên tục |
 | Token nội bộ giữa service dùng khóa chung HS256 | Chuyển sang Keycloak client credentials (mỗi service một confidential client) |
-| Keycloak chạy `start-dev`, HTTP | Production: `start` sau HTTPS, tắt client `swiftride-postman`, không import user demo |
+| Keycloak chạy `start-dev`, HTTP; `keycloak-setup` dùng tài khoản admin bootstrap | Production: `start` sau HTTPS, tắt client `swiftride-postman`, không import user demo; cấu hình realm bằng công cụ khai báo (Terraform/keycloak-config-cli) thay cho script kcadm |
 | Quãng đường và thời gian do client gửi lên (app lấy từ OSRM) | Trip/Pricing tự gọi dịch vụ định tuyến từ tọa độ đón/đến (đã lưu trong Trip) trước khi dùng tiền thật; dùng máy chủ OSRM/Nominatim riêng thay cho máy chủ demo công cộng |

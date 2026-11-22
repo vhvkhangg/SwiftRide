@@ -130,7 +130,7 @@ Không dùng `down -v` nếu muốn giữ dữ liệu.
 | Bộ test | Lệnh | Phạm vi |
 |---|---|---|
 | Unit / HTTP cục bộ | `dotnet test --solution SwiftRide.sln -- --filter-not-trait Category=Integration` | Domain, application, bảo mật endpoint, Gateway thật + SignalR |
-| Postman / Newman | Xem [postman/README.md](postman/README.md) | 73 request: đăng nhập Keycloak, token giả, vòng đời chuyến, reject → đổi tài xế, thanh toán, refund |
+| Postman / Newman | Xem [postman/README.md](postman/README.md) | 78 request: đăng ký Rider trong app, đăng nhập Keycloak, token giả, vòng đời chuyến, thanh toán bằng Card, reject → đổi tài xế, refund |
 | System / recovery | `python tests/System/messaging.py --dotnet dotnet` | 25 kịch bản trên stack Docker riêng: message trùng, kill service, restart broker/CSDL, replay lỗi |
 | Nghiệm thu Gateway + Keycloak | `pwsh -NoProfile -File tests/Gateway.Security/task1.ps1` | Token qua restart, readiness, logout, phân quyền, cô lập SignalR |
 
