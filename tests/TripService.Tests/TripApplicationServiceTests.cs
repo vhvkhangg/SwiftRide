@@ -45,6 +45,39 @@ public class TripApplicationServiceTests
             _messageBusMock.Object, options);
     }
 
+    // --- Tọa độ điểm đến (cho bản đồ của app) ---
+
+    [Fact]
+    public async Task CreateAsync_WithDropoffCoordinates_StoresAndReturnsBothPoints()
+    {
+        _pricingMock.Setup(x => x.GetQuoteAsync(It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MatchingQuoteResponse(0, 30, 10, 0, 0, 0, 4, 44));
+        Trip? saved = null;
+        _writerMock.Setup(x => x.AddAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()))
+            .Callback<Trip, CancellationToken>((trip, _) => saved = trip);
+
+        var response = await _service.CreateAsync(new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.76, 106.68, 2m, 5m,
+            DropoffLatitude: 10.77, DropoffLongitude: 106.70), TestContext.Current.CancellationToken);
+
+        Assert.Equal((10.77, 106.70), (saved!.DropoffLatitude, saved.DropoffLongitude));
+        Assert.Equal((10.76, 106.68, 10.77, 106.70),
+            (response.PickupLatitude, response.PickupLongitude, response.DropoffLatitude, response.DropoffLongitude));
+    }
+
+    [Theory]
+    [InlineData(10.77, null)]
+    [InlineData(91.0, 106.7)]
+    [InlineData(10.77, double.NaN)]
+    public async Task CreateAsync_InvalidDropoffCoordinates_Rejected(double? latitude, double? longitude)
+    {
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.76, 106.68, 2m, 5m,
+            DropoffLatitude: latitude, DropoffLongitude: longitude);
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => _service.CreateAsync(request, CancellationToken.None));
+        Assert.Contains("điểm đến", error.Message);
+        _pricingMock.Verify(x => x.GetQuoteAsync(It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // --- KỊCH BẢN 1: TEST IDEMPOTENCY ---
 
     private string ComputeHash(object payload)

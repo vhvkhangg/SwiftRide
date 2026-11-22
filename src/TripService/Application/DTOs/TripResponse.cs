@@ -15,5 +15,9 @@ public sealed record TripResponse(
     DateTime? UpdatedAt,
     string? PaymentFailureReason,
     int DeclineCount = 0,
-    int? DeclineThreshold = null
+    int? DeclineThreshold = null,
+    double? PickupLatitude = null,
+    double? PickupLongitude = null,
+    double? DropoffLatitude = null,
+    double? DropoffLongitude = null
 );

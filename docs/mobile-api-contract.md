@@ -8,27 +8,28 @@ Tai lieu mo ta code hien tai, khong coi API du kien la da co. HTTP/SignalR trans
 
 Token do Keycloak cap (realm `swiftride`, issuer `{KEYCLOAK_PUBLIC_URL}/realms/swiftride`, local `http://localhost:8180/realms/swiftride`). Gateway khong con /auth/*. Moi business HTTP request gui `Authorization: Bearer <access_token>`. Khong gui token qua query string cho HTTP API. Khong dung X-User-* lam danh tinh.
 
-App dung client public `swiftride-mobile` voi **Authorization Code + PKCE (S256)**, mo trang dang nhap/dang ky cua Keycloak trong trinh duyet he thong. Redirect URI hop le: `swiftride-rider://*`, `swiftride-driver://*`, `exp://*` (Expo Go), `http://localhost:8081/*` (web preview). Client nay khong cho password grant.
+App dung client public `swiftride-mobile` voi **Authorization Code + PKCE (S256)**, mo trang dang nhap cua Keycloak trong trinh duyet he thong. Dang ky Rider lam ngay trong app qua Gateway (`POST /api/auth/register`, khong can token); trang dang ky cua Keycloak da tat. Redirect URI hop le: `swiftride-rider://*`, `swiftride-driver://*`, `exp://*` (Expo Go), `http://localhost:8081/*` (web preview). Client nay khong cho password grant.
 
 | Viec | Endpoint (goc `/realms/swiftride/protocol/openid-connect`) | Ket qua |
 |---|---|---|
 | Dang nhap | GET /auth?client_id=swiftride-mobile&response_type=code&scope=openid&code_challenge=…&code_challenge_method=S256&redirect_uri=… | Redirect ve app kem `code` |
-| Dang ky | GET /registrations (cung tham so) | Tao user moi, luon chi co role Rider |
 | Doi code lay token | POST /token: grant_type=authorization_code, client_id, code, code_verifier, redirect_uri | 200: access_token, refresh_token, expires_in |
 | Lam moi token | POST /token: grant_type=refresh_token, client_id, refresh_token | 200: cap token moi; refresh token cu het hieu luc |
 | Danh tinh | GET /userinfo + Bearer | 200: sub, email, role[] |
 | Dang xuat | POST /logout: client_id, refresh_token | 204 |
 
+Dang ky (Gateway, khong can token): `POST /api/auth/register` body `{ "email", "password", "firstName", "lastName" }` -> 201 `{ "email", "role": "Rider" }`; 400 problem (`errors` theo field: mat khau 12-128 ky tu va khac email, ho/ten bat buoc); 409 email da ton tai; 429 qua nhieu lan; 503 Keycloak loi (gui lai co the nhan 409 neu user da duoc tao). Sau do dang nhap PKCE nhu tren, co the gui them `login_hint=<email>`.
+
 Access token song 15 phut. Chi cho mot refresh request chay tai mot thoi diem va thay ca cap token; refresh token cu bi tu choi (400 invalid_grant). Logout dong SignalR va xoa token tren client; access token da cap van co the hop le den expiry.
 
 Driver/Admin chi duoc cap trong Keycloak Admin Console; dang ky cong khai khong tu cap Driver/Admin. Demo development: rider.demo@example.com, rider.other@example.com, driver.demo@example.com, driver.other@example.com, admin.demo@example.com.
 
-Trang thai app hien tai: man hinh dang nhap trong `mobile/` van la ban demo noi bo, chua noi Keycloak; client `swiftride-mobile` da san sang trong realm.
+Trang thai app hien tai: app `mobile/` (khong con che do demo) dang nhap bang client `swiftride-mobile` (PKCE) va goi cac endpoint ben duoi qua Gateway (xem `mobile/README.md`). Web preview can Gateway bat CORS cho origin cua Expo (`Cors:AllowedOrigins`, mac dinh localhost:8081/8082).
 
 ## Rider flow
 
 1. GET /userinfo cua Keycloak (hoac doc claim `role` trong token), xac nhan role Rider.
-2. POST /api/matching/quote de hien gia tham khao. Body: distance (km), estimatedTime (phut), rideType, promoCode (optional). Response: base, distance, time, surge, toll, discount, tax, total.
+2. POST /api/matching/quote de hien gia tham khao. Body: distance (km), estimatedTime (phut), rideType, promoCode (optional). Response: base, distance, time, surge, toll, discount, tax, total - deu la SO TIEN (distance = cuoc theo km, time = cuoc theo phut, surge = tien phu thu cao diem, khong phai he so).
 3. POST /api/trips/ de tao chuyen va lay gia do Trip goi Pricing noi bo. Khong gui fareEstimate; RiderId trong body bi ghi de boi JWT.
 4. Hien gia `fareEstimate` tu chuyen vua tao; Rider dong y thi POST /api/trips/{id}/confirm-price, body `{}`, response 202.
 5. Cho `tripChanged` hoac poll GET /api/trips/{id}; 202 chi la da nhan yeu cau, khong co nghia da co tai xe.
@@ -46,9 +47,13 @@ Body tao chuyen:
   "distance": 2,
   "estimatedTime": 5,
   "rideType": "standard",
-  "promoCode": null
+  "promoCode": null,
+  "dropoffLatitude": 10.7798,
+  "dropoffLongitude": 106.6990
 }
 ```
+
+`dropoffLatitude`/`dropoffLongitude` la tuy chon (de app ve ban do); neu gui thi phai gui ca hai va hop le, va chung tham gia hash idempotency. Trip detail va danh sach loi moi tra them `pickupLatitude, pickupLongitude, dropoffLatitude, dropoffLongitude` (co the null voi chuyen cu).
 
 Response 201 va GET detail: `id, riderId, driverId, pickupAddress, dropoffAddress, fareEstimate, status, createdAt, updatedAt`. DriverId/updatedAt co the null. Khong coi gia tham khao truoc khi tao chuyen la gia da chot. Don vi tien va tinh hop le distance/time can duoc nhom Pricing chot truoc su dung tien that; khong tu nhan 1000 tren UI.
 

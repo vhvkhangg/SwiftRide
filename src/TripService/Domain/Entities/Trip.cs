@@ -14,6 +14,8 @@ public sealed class Trip
     public string DropoffAddress { get; private set; } = string.Empty;
     public double? PickupLatitude { get; private set; }
     public double? PickupLongitude { get; private set; }
+    public double? DropoffLatitude { get; private set; }
+    public double? DropoffLongitude { get; private set; }
     public decimal? FareEstimate { get; private set; }
     public TripStatus Status { get; private set; }
     public int MatchingAttempt { get; private set; }
@@ -40,7 +42,9 @@ public sealed class Trip
     double? pickupLatitude = null,
     double? pickupLongitude = null,
     string? idempotencyKey = null,
-    string? payloadHash = null)
+    string? payloadHash = null,
+    double? dropoffLatitude = null,
+    double? dropoffLongitude = null)
     {
         var trip = new Trip
         {
@@ -50,6 +54,8 @@ public sealed class Trip
             DropoffAddress = dropoff,
             PickupLatitude = pickupLatitude,
             PickupLongitude = pickupLongitude,
+            DropoffLatitude = dropoffLatitude,
+            DropoffLongitude = dropoffLongitude,
             FareEstimate = fare,
             CreatedAt = DateTime.UtcNow,
             Status = TripStatus.Requested,

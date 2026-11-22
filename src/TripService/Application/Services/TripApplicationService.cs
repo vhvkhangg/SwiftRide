@@ -94,6 +94,12 @@ public sealed class TripApplicationService : ITripApplicationService
             request.PickupLongitude.Value < -180 || request.PickupLongitude.Value > 180)
             throw new ArgumentException("Cần tọa độ điểm đón hợp lệ.");
 
+        if ((request.DropoffLatitude.HasValue || request.DropoffLongitude.HasValue) &&
+            (request.DropoffLatitude is not { } dropoffLat || request.DropoffLongitude is not { } dropoffLng ||
+             !double.IsFinite(dropoffLat) || !double.IsFinite(dropoffLng) ||
+             dropoffLat < -90 || dropoffLat > 90 || dropoffLng < -180 || dropoffLng > 180))
+            throw new ArgumentException("Tọa độ điểm đến không hợp lệ.");
+
         // Lấy báo giá
         var quote = await _matchingPricing.GetQuoteAsync(
         new MatchingQuoteRequest(
@@ -112,7 +118,9 @@ public sealed class TripApplicationService : ITripApplicationService
             request.PickupLatitude,
             request.PickupLongitude,
             request.IdempotencyKey,
-            GeneratePayloadHash(request)); // Băm DTO
+            GeneratePayloadHash(request), // Băm DTO
+            request.DropoffLatitude,
+            request.DropoffLongitude);
 
         try { await _writer.AddAsync(trip, ct); }
         catch (DbUpdateException exception) when (exception.InnerException is PostgresException
@@ -136,7 +144,7 @@ public sealed class TripApplicationService : ITripApplicationService
     private static string GeneratePayloadHash(CreateTripRequest request)
     {
         // Loại bỏ các trường không cấu thành sự khác biệt về payload nghiệp vụ (như IdempotencyKey)
-        var payloadForHash = new
+        var core = new
         {
             request.RiderId,
             request.PickupAddress,
@@ -148,6 +156,10 @@ public sealed class TripApplicationService : ITripApplicationService
             request.RideType,
             request.PromoCode
         };
+        // Dropoff coordinates join the hash only when sent, so hashes of requests without them stay unchanged.
+        object payloadForHash = request.DropoffLatitude is null && request.DropoffLongitude is null
+            ? core
+            : new { core, request.DropoffLatitude, request.DropoffLongitude };
         using var sha256 = SHA256.Create();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payloadForHash));
         return Convert.ToBase64String(sha256.ComputeHash(bytes));
@@ -623,7 +635,11 @@ public sealed class TripApplicationService : ITripApplicationService
             trip.UpdatedAt,
             trip.PaymentFailureReason,
             trip.DeclineCount,
-            _optionsMonitor.CurrentValue.DeclineThreshold);
+            _optionsMonitor.CurrentValue.DeclineThreshold,
+            trip.PickupLatitude,
+            trip.PickupLongitude,
+            trip.DropoffLatitude,
+            trip.DropoffLongitude);
 }
 
 public sealed class TripMessagePublishException(Guid tripId, string message, Exception innerException)

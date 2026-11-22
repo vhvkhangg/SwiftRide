@@ -317,6 +317,12 @@ namespace SwiftRide.TripService.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<double?>("DropoffLatitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("DropoffLongitude")
+                        .HasColumnType("double precision");
+
                     b.Property<decimal?>("FareEstimate")
                         .HasColumnType("numeric");
 

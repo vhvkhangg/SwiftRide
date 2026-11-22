@@ -66,6 +66,18 @@ test('Readiness resets runtime state and creates a fresh run ID', () => {
     assert.equal(result.state.has('tripId'), false);
     assert.ok(result.state.get('runId'));
 });
+test('In-app sign-up goes through the Gateway and must create a Rider for this run', () => {
+    const item = requests.find(request => request.name.startsWith('03 '));
+    assert.equal(item.request.url, '{{baseUrl}}/api/auth/register');
+    assert.equal(item.request.auth.type, 'noauth');
+    const body = JSON.parse(item.request.body.raw);
+    assert.ok(!('role' in body) && !('realmRoles' in body));
+    const ok = execute('03 ', { email: 'postman.run@example.com', role: 'Rider' }, { code: 201, values: { runId: 'run' } });
+    assert.deepEqual(ok.failures, []);
+    assert.equal(execute('03 ', { email: 'postman.run@example.com', role: 'Driver' }, { code: 201, values: { runId: 'run' } }).failures.length, 1);
+    const taken = execute('03 ', {}, { code: 409, values: { runId: 'run' } });
+    assert.equal(taken.next, null);
+});
 test('Login captures tokens only on successful response', () => {
     const valid = execute('04 ', { access_token: 'token', refresh_token: 'refresh', token_type: 'Bearer' });
     assert.equal(valid.state.get('riderToken'), 'token');

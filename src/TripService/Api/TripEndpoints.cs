@@ -120,7 +120,11 @@ public static class TripEndpoints
                     invitation.ExpiresAtUtc,
                     trip.PickupAddress,
                     trip.DropoffAddress,
-                    trip.FareEstimate
+                    trip.FareEstimate,
+                    trip.PickupLatitude,
+                    trip.PickupLongitude,
+                    trip.DropoffLatitude,
+                    trip.DropoffLongitude
                 })
                 .ToListAsync(ct);
 
