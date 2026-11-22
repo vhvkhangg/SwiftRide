@@ -145,7 +145,8 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
                 request.Amount,
                 request.IdempotencyKey,
                 request.PayerAccount,
-                request.PayeeAccount
+                request.PayeeAccount,
+                request.PaymentMethod
             );
 
             failed.MarkFailed(decision.FailureCode, decision.FailureReason);
@@ -267,7 +268,8 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
             request.Amount,
             request.IdempotencyKey,
             request.PayerAccount,
-            request.PayeeAccount
+            request.PayeeAccount,
+            request.PaymentMethod
         );
 
         var entries = new[]
@@ -344,6 +346,7 @@ public sealed class PaymentApplicationService : IPaymentApplicationService
     {
         return payment.TripId == request.TripId &&
         payment.Amount == request.Amount &&
+        payment.PaymentMethod == request.PaymentMethod &&
         string.Equals(
             payment.PayerAccount,
             request.PayerAccount,

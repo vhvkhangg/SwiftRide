@@ -15,5 +15,7 @@ public sealed record CreateTripRequest(
     string? IdempotencyKey = null,
     // Optional: lets apps draw the route on a map. Not used for pricing (distance/time are sent above).
     double? DropoffLatitude = null,
-    double? DropoffLongitude = null
+    double? DropoffLongitude = null,
+    // "Wallet" (default when omitted) or "Card"; sent to Payment when the trip is dropped off.
+    string? PaymentMethod = null
 );

@@ -17,6 +17,8 @@ public sealed class Trip
     public double? DropoffLatitude { get; private set; }
     public double? DropoffLongitude { get; private set; }
     public decimal? FareEstimate { get; private set; }
+    /// <summary>Phương thức Rider chọn khi đặt chuyến: "Wallet" hoặc "Card".</summary>
+    public string PaymentMethod { get; private set; } = PaymentMethods.Wallet;
     public TripStatus Status { get; private set; }
     public int MatchingAttempt { get; private set; }
     /// <summary>Số lần tài xế từ chối hoặc để lời mời hết giờ (so với ngưỡng k).</summary>
@@ -44,8 +46,11 @@ public sealed class Trip
     string? idempotencyKey = null,
     string? payloadHash = null,
     double? dropoffLatitude = null,
-    double? dropoffLongitude = null)
+    double? dropoffLongitude = null,
+    string paymentMethod = PaymentMethods.Wallet)
     {
+        if (!PaymentMethods.IsSupported(paymentMethod))
+            throw new ArgumentException("Phương thức thanh toán không được hỗ trợ.", nameof(paymentMethod));
         var trip = new Trip
         {
             Id = Guid.NewGuid(),
@@ -56,6 +61,7 @@ public sealed class Trip
             PickupLongitude = pickupLongitude,
             DropoffLatitude = dropoffLatitude,
             DropoffLongitude = dropoffLongitude,
+            PaymentMethod = paymentMethod,
             FareEstimate = fare,
             CreatedAt = DateTime.UtcNow,
             Status = TripStatus.Requested,

@@ -501,7 +501,7 @@ public Task<PaymentDecision> DecideAsync(TripSnapshot trip, CreatePaymentRequest
     methods.Create(request.PaymentMethod).AuthorizeAsync(trip, request, ct);
 ```
 
-Cả hai phương thức đều là mô phỏng: Wallet luôn duyệt; Card mô phỏng cổng thẻ với hạn mức 5.000.000 VND/giao dịch (vượt thì `PAYMENT_DECLINED`) và không lưu số thẻ. Thêm phương thức mới (ví dụ QR) chỉ cần một lớp `IPaymentMethod` và một nhánh trong factory (OCP). Hiện Trip luôn gửi `Wallet` vì app chưa có màn hình chọn phương thức.
+Cả hai phương thức đều là mô phỏng: Wallet luôn duyệt; Card mô phỏng cổng thẻ với hạn mức 5.000.000 VND/giao dịch (vượt thì `PAYMENT_DECLINED`) và không lưu số thẻ. Thêm phương thức mới (ví dụ QR) chỉ cần một lớp `IPaymentMethod` và một nhánh trong factory (OCP). Rider chọn Ví SwiftRide hoặc Thẻ khi đặt xe (`paymentMethod` trong `POST /api/trips/`, mặc định Wallet, giá trị khác bị 400). Trip lưu lựa chọn (thuộc hash idempotency), gửi kèm `TripDroppedOffV1` khi trả khách; Payment lưu `payment_method` và trả về trong `GET /api/payments/...`. Postman chạy chuyến chính bằng Card đầu-cuối.
 
 ---
 

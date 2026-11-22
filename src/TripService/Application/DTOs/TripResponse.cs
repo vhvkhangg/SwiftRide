@@ -19,5 +19,6 @@ public sealed record TripResponse(
     double? PickupLatitude = null,
     double? PickupLongitude = null,
     double? DropoffLatitude = null,
-    double? DropoffLongitude = null
+    double? DropoffLongitude = null,
+    string PaymentMethod = "Wallet"
 );

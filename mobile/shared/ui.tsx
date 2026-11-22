@@ -19,6 +19,7 @@ const iconPaths = {
   check: 'm5 12 4 4L20 5', close: 'm6 6 12 12M6 18 18 6',
   layers: 'm12 3 10 5-10 5L2 8Zm-9 10 9 5 9-5M3 18l9 5 9-5',
   card: 'M3 5h18v14H3ZM3 10h18M6 15h4',
+  wallet: 'M3 7h16v13H3ZM3 7l12-4v4M15 13h4',
   bike: 'M9 17a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm14 0a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM5 17l5-9 5 9h4L14 4h4M8 8h7',
   warning: 'M12 3 1 21h22ZM12 9v5m0 3v1',
   logout: 'M9 4H3v16h6m5-13 5 5-5 5M7 12h12',

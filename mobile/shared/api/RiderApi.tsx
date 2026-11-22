@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Button, Card, Eyebrow, Icon, Metric, Note, palette, styles, T, Title } from '../ui';
 import LiveMap from '../map/LiveMap';
 import { PlaceRow, PlaceSearch, quickPlaces } from '../map/PlacePicker';
@@ -10,8 +10,8 @@ import { useRoute } from '../map/useRoute';
 import { GatewayError } from '../gateway';
 import { errorText, isNotFound, usePoll } from './hooks';
 import type { ApiScreenProps } from './ApiApp';
-import { isTerminal, pointsOf, priceText, riderCanCancel, shortId, statusName, statusText } from './trip';
-import type { QuoteDto, TripDto } from './trip';
+import { isTerminal, paymentMethods, paymentMethodText, pointsOf, priceText, riderCanCancel, shortId, statusName, statusText } from './trip';
+import type { PaymentMethod, QuoteDto, TripDto } from './trip';
 
 export type SagaDto = { state: string; amount: number; paymentMethod: string; failureReason: string | null; deadlineUtc: string; completedAtUtc: string | null };
 export const sagaText: Record<string, string> = {
@@ -32,7 +32,7 @@ export function SagaCard({ saga }: { saga: SagaDto | null }) {
   if (!saga) return <View style={styles.row}><ActivityIndicator color={palette.teal} /><T style={styles.flex}>Đang chờ Saga thanh toán khởi tạo...</T></View>;
   return <View style={{ gap: 6 }}>
     <T style={styles.place}>{sagaText[saga.state] ?? saga.state}</T>
-    <T style={styles.caption}>{`Saga: ${saga.state} · ${saga.paymentMethod} · ${priceText(saga.amount)}`}</T>
+    <T style={styles.caption}>{`Saga: ${saga.state} · ${paymentMethodText(saga.paymentMethod)} · ${priceText(saga.amount)}`}</T>
     {saga.state === 'AwaitingPayment' && <T style={styles.caption}>{`Hạn chót: ${new Date(saga.deadlineUtc).toLocaleTimeString('vi-VN')}`}</T>}
     {!!saga.failureReason && <T style={[styles.caption, { color: palette.coral }]}>{`Lý do: ${saga.failureReason}`}</T>}
   </View>;
@@ -47,7 +47,9 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
   const [trip, setTrip] = useState<TripDto | null>(null);
   const [saga, setSaga] = useState<SagaDto | null>(null);
   const [error, setError] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('Wallet');
   const idempotencyKey = useRef('');
+  const newKey = () => { idempotencyKey.current = `mobile-${claims.sub}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; };
   const status = trip ? statusName(trip.status) : null;
   const draftRoute = useRoute(trip ? null : pickup, trip ? null : destination);
   const tripPoints = trip ? pointsOf(trip) : { pickup: null, destination: null };
@@ -94,8 +96,10 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
   const getQuote = run(async () => {
     if (!draftRoute) return;
     setQuote(await call<QuoteDto>('POST', '/api/matching/quote', { distance: draftRoute.distance, estimatedTime: draftRoute.estimatedTime, rideType: 'standard' }));
-    idempotencyKey.current = `mobile-${claims.sub}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    newKey();
   });
+  // The method is part of the booking payload, so a new choice gets a new idempotency key (the old one would answer 409).
+  const chooseMethod = (next: PaymentMethod) => { if (next !== method) { setMethod(next); newKey(); setError(''); } };
   const book = run(async () => {
     if (!pickup || !destination || !draftRoute) return;
     // One idempotency key per quote: tapping again after a lost response returns the same trip.
@@ -104,11 +108,12 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
       pickupLatitude: pickup.latitude, pickupLongitude: pickup.longitude,
       dropoffLatitude: destination.latitude, dropoffLongitude: destination.longitude,
       distance: draftRoute.distance, estimatedTime: draftRoute.estimatedTime, rideType: 'standard', idempotencyKey: idempotencyKey.current,
+      paymentMethod: method,
     }));
   });
   const confirm = run(async () => { await call('POST', `/api/trips/${trip!.id}/confirm-price`, {}); await reload(trip!.id); });
   const cancel = run(async () => { await call('POST', `/api/trips/${trip!.id}/cancel`, {}); await reload(trip!.id); });
-  const reset = () => { setTrip(null); setQuote(null); setSaga(null); setDestination(null); setField('destination'); setError(''); };
+  const reset = () => { setTrip(null); setQuote(null); setSaga(null); setDestination(null); setField('destination'); setMethod('Wallet'); setError(''); };
 
   if (loading) return <ActivityIndicator accessibilityLabel="Đang tải chuyến" color={palette.teal} style={{ marginTop: 60 }} />;
   const banner = !!error && <Note warning>{error}</Note>;
@@ -140,6 +145,8 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
       <Line label="Giảm giá" value={priceText(quote.discount)} />
       <Line label="Thuế VAT" value={priceText(quote.tax)} />
       <Note>Giá tham khảo. Giá chốt do Trip Service lấy lại từ Pricing khi tạo chuyến.</Note>
+      <View style={styles.divider} />
+      <MethodChoice value={method} onChange={chooseMethod} />
       {banner}
       <Button title="Đặt xe" icon="arrow" onPress={book} />
       <Button title="Sửa hành trình" variant="secondary" onPress={() => { setQuote(null); setError(''); }} />
@@ -155,7 +162,7 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
       <T style={[styles.muted, { textAlign: 'center' }]}>{status === 'Paid' ? 'Payment Service đã thu tiền và Trip đã ghi nhận.' : status === 'Cancelled' ? 'Không phát sinh thanh toán cho chuyến đã hủy.' : trip.paymentFailureReason ? `Lý do: ${trip.paymentFailureReason}` : `Không tìm được tài xế sau ${trip.declineCount ?? 0} lần từ chối.`}</T>
     </View>
     <TripRoute pickup={trip.pickupAddress} dropoff={trip.dropoffAddress} />
-    <View style={styles.row}><Metric label="Giá chuyến" value={priceText(trip.fareEstimate)} /><Metric label="Tài xế" value={shortId(trip.driverId)} /></View>
+    <View style={styles.row}><Metric label="Giá chuyến" value={priceText(trip.fareEstimate)} /><Metric label="Thanh toán" value={paymentMethodText(trip.paymentMethod)} /></View>
     {paymentPhase && <SagaCard saga={saga} />}
     <Button title="Đặt chuyến mới" icon="arrow" onPress={reset} />
   </Card></>;
@@ -170,6 +177,7 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
       {trip.driverId && <View style={styles.person}><View style={styles.avatar}><Icon name="bike" size={28} /></View><View style={styles.flex}><T style={styles.place}>{`Tài xế ${shortId(trip.driverId)}`}</T><T style={styles.caption}>Mã tài xế lấy từ Trip Service</T></View></View>}
       <TripRoute pickup={trip.pickupAddress} dropoff={trip.dropoffAddress} />
       <T style={styles.fare}>{priceText(trip.fareEstimate)}</T>
+      <Line label="Thanh toán" value={paymentMethodText(trip.paymentMethod)} />
       {status === 'Requested' && <Note>Giá đã được Trip Service chốt từ Pricing. Xác nhận để bắt đầu tìm tài xế.</Note>}
       {paymentPhase && <SagaCard saga={saga} />}
       {banner}
@@ -177,6 +185,24 @@ export default function RiderApi({ call, claims }: ApiScreenProps) {
       {status && riderCanCancel(status) && <Button title={status === 'Requested' ? 'Từ chối giá' : 'Hủy chuyến'} variant="danger" onPress={cancel} />}
     </Card>
   </>;
+}
+
+/** Wallet / Card choice before booking. Card is a simulated gateway: the app never asks for card numbers. */
+export function MethodChoice({ value, onChange }: { value: PaymentMethod; onChange: (method: PaymentMethod) => void }) {
+  return <View accessibilityRole="radiogroup" accessibilityLabel="Phương thức thanh toán" style={{ gap: 8 }}>
+    <T style={styles.subtitle}>Thanh toán</T>
+    <View style={styles.row}>
+      {paymentMethods.map(item => {
+        const selected = item === value;
+        return <Pressable key={item} accessibilityRole="radio" accessibilityState={{ checked: selected }} accessibilityLabel={paymentMethodText(item)} onPress={() => onChange(item)}
+          style={[styles.input, styles.flex, styles.row, { justifyContent: 'center' }, selected && { borderColor: palette.teal, backgroundColor: palette.mint }]}>
+          <Icon name={item === 'Card' ? 'card' : 'wallet'} color={selected ? palette.teal : palette.muted} />
+          <T style={[styles.place, !selected && { color: palette.muted }]}>{paymentMethodText(item)}</T>
+        </Pressable>;
+      })}
+    </View>
+    {value === 'Card' && <T style={styles.caption}>Thẻ mô phỏng cổng thanh toán: app không nhập số thẻ; Payment Service duyệt tối đa 5.000.000 ₫ mỗi giao dịch.</T>}
+  </View>;
 }
 
 function Line({ label, value }: { label: string; value: string }) {
