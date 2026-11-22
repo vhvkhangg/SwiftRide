@@ -113,11 +113,13 @@ public sealed class MongoMatchingOutboxTests
         var firstLock = Guid.NewGuid();
         var secondLock = Guid.NewGuid();
         var thirdLock = Guid.NewGuid();
-        var now = DateTime.UtcNow;
 
         try
         {
             Assert.True(await outbox.EnqueueNoDriverFoundAsync(tripId, 1, "none available", ct));
+            // Enqueue timestamps with its own wall clock; start the simulated lease timeline
+            // after that timestamp so the first claim is due even on coarse-resolution clocks.
+            var now = DateTime.UtcNow.AddMinutes(1);
             var claimed = await outbox.ClaimNextAsync(firstLock, now, TimeSpan.FromMinutes(1), ct);
             Assert.NotNull(claimed);
             Assert.Null(await outbox.ClaimNextAsync(
