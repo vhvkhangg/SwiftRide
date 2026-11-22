@@ -2,7 +2,7 @@
 
 ## Pham vi
 
-Collection co 76 request: readiness, Keycloak discovery/trang dang ky, dang nhap qua Keycloak (Rider, Driver, Admin), role isolation, token gia/het han, quote, GPS, Trip idempotency, invitation/accept, enroute/pickup/dropoff, cho Paid, doc Payment, Admin refund, Driver reject doi ung vien, cancel, refresh/logout. Token lay tu Keycloak (`{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/*`, client dev-only `swiftride-postman`, password grant); API nghiep vu chi goi qua API Gateway. Khong ep trang thai noi bo hoac tao Payment lan hai.
+Collection co 76 request: readiness, Keycloak discovery, dang ky Rider trong app qua Gateway (`POST /api/auth/register`, email moi moi lan chay), dang nhap qua Keycloak (Rider, Driver, Admin), role isolation, token gia/het han, quote, GPS, Trip idempotency, invitation/accept, enroute/pickup/dropoff, cho Paid, doc Payment, Admin refund, Driver reject doi ung vien, cancel, refresh/logout. Token lay tu Keycloak (`{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/*`, client dev-only `swiftride-postman`, password grant); API nghiep vu chi goi qua API Gateway. Khong ep trang thai noi bo hoac tao Payment lan hai.
 
 Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, tao 3 Trip va 1 Payment (Payment bi refund o cuoi luong); doi online/offline cua 2 Driver demo. Khong xoa du lieu/volume. Neu run dung giua chung, xu ly Trip con dang chay va dat Driver offline bang request 71 va 60 (hoac 22). Khong export collection sau run kem token that.
 

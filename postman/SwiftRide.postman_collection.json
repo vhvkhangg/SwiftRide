@@ -129,14 +129,23 @@
           ]
         },
         {
-          "name": "03 Self-registration page available",
+          "name": "03 In-app Rider sign-up via Gateway",
           "request": {
-            "method": "GET",
-            "header": [],
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "auth": {
               "type": "noauth"
             },
-            "url": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/registrations?client_id=swiftride-mobile&response_type=code&scope=openid&redirect_uri=http%3A%2F%2Flocalhost%3A8081%2Fcallback&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman.{{runId}}@example.com\",\n  \"password\": \"{{seedPassword}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Rider\"\n}"
+            }
           },
           "event": [
             {
@@ -144,10 +153,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const expected = [200];",
+                  "const expected = [201];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.text()).to.include('kc-register-form'); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.email).to.eql('postman.' + pm.collectionVariables.get('runId') + '@example.com'); pm.expect(data.role).to.eql('Rider'); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }
