@@ -32,6 +32,12 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(t => t.DeclineCount)
             .HasDefaultValue(0);
 
+        // Trips created before payment methods existed pay from the wallet.
+        builder.Property(t => t.PaymentMethod)
+            .HasMaxLength(16)
+            .HasDefaultValue(PaymentMethods.Wallet)
+            .IsRequired();
+
         builder.Property(t => t.PaymentFailureReason)
             .HasMaxLength(1000);
 

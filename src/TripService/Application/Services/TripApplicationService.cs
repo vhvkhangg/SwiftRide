@@ -100,6 +100,9 @@ public sealed class TripApplicationService : ITripApplicationService
              dropoffLat < -90 || dropoffLat > 90 || dropoffLng < -180 || dropoffLng > 180))
             throw new ArgumentException("Tọa độ điểm đến không hợp lệ.");
 
+        var paymentMethod = PaymentMethods.Normalize(request.PaymentMethod)
+            ?? throw new ArgumentException("Phương thức thanh toán chỉ nhận Wallet hoặc Card.");
+
         // Lấy báo giá
         var quote = await _matchingPricing.GetQuoteAsync(
         new MatchingQuoteRequest(
@@ -120,7 +123,8 @@ public sealed class TripApplicationService : ITripApplicationService
             request.IdempotencyKey,
             GeneratePayloadHash(request), // Băm DTO
             request.DropoffLatitude,
-            request.DropoffLongitude);
+            request.DropoffLongitude,
+            paymentMethod);
 
         try { await _writer.AddAsync(trip, ct); }
         catch (DbUpdateException exception) when (exception.InnerException is PostgresException
@@ -160,6 +164,9 @@ public sealed class TripApplicationService : ITripApplicationService
         object payloadForHash = request.DropoffLatitude is null && request.DropoffLongitude is null
             ? core
             : new { core, request.DropoffLatitude, request.DropoffLongitude };
+        // Same rule for the payment method: Wallet (or omitted) keeps the old hash; Card or an invalid value changes it.
+        var method = PaymentMethods.Normalize(request.PaymentMethod) ?? request.PaymentMethod;
+        if (method != PaymentMethods.Wallet) payloadForHash = new { payload = payloadForHash, PaymentMethod = method };
         using var sha256 = SHA256.Create();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payloadForHash));
         return Convert.ToBase64String(sha256.ComputeHash(bytes));
@@ -379,8 +386,8 @@ public sealed class TripApplicationService : ITripApplicationService
                 IdempotencyKey = $"trip-{trip.Id:N}-payment-v1",
                 PayerAccount = $"rider-{trip.RiderId:D}",
                 PayeeAccount = $"driver-{trip.DriverId.Value:D}",
-                // Rider chưa chọn được phương thức trong app; mặc định ví SwiftRide.
-                PaymentMethod = "Wallet",
+                // Phương thức Rider chọn khi đặt chuyến (Wallet/Card).
+                PaymentMethod = trip.PaymentMethod,
                 OccurredAtUtc = DateTimeOffset.UtcNow
             };
 
@@ -639,7 +646,8 @@ public sealed class TripApplicationService : ITripApplicationService
             trip.PickupLatitude,
             trip.PickupLongitude,
             trip.DropoffLatitude,
-            trip.DropoffLongitude);
+            trip.DropoffLongitude,
+            trip.PaymentMethod);
 }
 
 public sealed class TripMessagePublishException(Guid tripId, string message, Exception innerException)

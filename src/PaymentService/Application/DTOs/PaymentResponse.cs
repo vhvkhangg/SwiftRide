@@ -12,11 +12,12 @@ public sealed record PaymentResponse(
     DateTimeOffset UpdatedAt,
     bool IsTripSynced,
     string? FailureCode = null,
-    string? FailureReason = null
+    string? FailureReason = null,
+    string PaymentMethod = "Wallet"
 )
 {
     public static PaymentResponse From(Payment p) => new(
         p.Id, p.TripId, p.Amount, p.Status.ToString(), p.IdempotencyKey,
         p.CreatedAt, p.UpdatedAt, p.IsTripSynced,
-        p.FailureCode, p.FailureReason);
+        p.FailureCode, p.FailureReason, p.PaymentMethod.ToString());
 }

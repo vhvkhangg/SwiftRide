@@ -605,6 +605,54 @@ public sealed class PaymentApplicationServiceTests
 
 
     [Fact]
+    public async Task ProcessCommand_Card_StoresAndReturnsTheMethod()
+    {
+        var (request, snapshot) = NewRequest();
+        request = request with { PaymentMethod = PaymentMethodType.Card };
+        _trip.Setup(x => x.GetByIdAsync(request.TripId, It.IsAny<CancellationToken>())).ReturnsAsync(snapshot);
+        Payment? stored = null;
+        _repo.Setup(x => x.AddAsync(It.IsAny<Payment>(), It.IsAny<CancellationToken>()))
+            .Callback<Payment, CancellationToken>((payment, _) => stored = payment).Returns(Task.CompletedTask);
+
+        var result = await _service.ProcessPaymentCommandAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PaymentStatus.Succeeded.ToString(), result.Status);
+        Assert.Equal("Card", result.PaymentMethod);
+        Assert.Equal(PaymentMethodType.Card, stored!.PaymentMethod);
+    }
+
+    [Fact]
+    public async Task ProcessCommand_CardOverLimit_StoresDeclinedCardPayment()
+    {
+        var tripId = Guid.NewGuid();
+        var amount = 5_000_001m;
+        var (rider, driver) = (Guid.NewGuid(), Guid.NewGuid());
+        var request = new CreatePaymentRequest(tripId, amount, Guid.NewGuid().ToString("N"), $"rider-{rider:D}", $"driver-{driver:D}", PaymentMethodType.Card);
+        _trip.Setup(x => x.GetByIdAsync(tripId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TripSnapshot(tripId, rider, driver, amount, TripStatusCode.PaymentPending));
+
+        var result = await _service.ProcessPaymentCommandAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PaymentStatus.Failed.ToString(), result.Status);
+        Assert.Equal("PAYMENT_DECLINED", result.FailureCode);
+        Assert.Equal("Card", result.PaymentMethod);
+        _repo.Verify(x => x.AddLedgerEntriesAsync(It.IsAny<IEnumerable<LedgerEntry>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessCommand_SameKeyDifferentMethod_IsRejectedAsDifferentPayload()
+    {
+        var (request, _) = NewRequest();
+        var existing = Payment.Create(request.TripId, request.Amount, request.IdempotencyKey, request.PayerAccount, request.PayeeAccount);
+        existing.MarkSucceeded();
+        _repo.Setup(x => x.GetByIdempotencyKeyAsync(request.IdempotencyKey, It.IsAny<CancellationToken>())).ReturnsAsync(existing);
+
+        await Assert.ThrowsAsync<PaymentCommandRejectedException>(() => _service.ProcessPaymentCommandAsync(
+            request with { PaymentMethod = PaymentMethodType.Card }, TestContext.Current.CancellationToken));
+        Assert.Equal("Wallet", PaymentResponse.From(existing).PaymentMethod);
+    }
+
+    [Fact]
     public async Task ProcessCommand_NewPayment_ShouldValidateTripWithoutMarkPaid()
     {
         var (request, snapshot) = NewRequest();

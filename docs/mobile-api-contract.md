@@ -49,9 +49,12 @@ Body tao chuyen:
   "rideType": "standard",
   "promoCode": null,
   "dropoffLatitude": 10.7798,
-  "dropoffLongitude": 106.6990
+  "dropoffLongitude": 106.6990,
+  "paymentMethod": "Card"
 }
 ```
+
+`paymentMethod` la tuy chon: `"Wallet"` (mac dinh khi bo trong) hoac `"Card"` (khong phan biet hoa thuong); gia tri khac bi 400. Phuong thuc thuoc hash idempotency (gui lai cung key nhung doi phuong thuc bi 409), duoc luu trong Trip va tra ve o `paymentMethod` cua Trip detail; khi tra khach Trip gui no cho Payment. `GET /api/payments/...` tra them `paymentMethod`. Card la cong the mo phong: app khong nhap so the, Payment tu choi giao dich tren 5.000.000 (Trip `Failed`, ly do trong `paymentFailureReason`).
 
 `dropoffLatitude`/`dropoffLongitude` la tuy chon (de app ve ban do); neu gui thi phai gui ca hai va hop le, va chung tham gia hash idempotency. Trip detail va danh sach loi moi tra them `pickupLatitude, pickupLongitude, dropoffLatitude, dropoffLongitude` (co the null voi chuyen cu).
 

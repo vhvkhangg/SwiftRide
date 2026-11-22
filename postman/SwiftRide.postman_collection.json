@@ -1131,7 +1131,7 @@
       "name": "04 - Trip and idempotency",
       "item": [
         {
-          "name": "24 Create Trip",
+          "name": "24 Create Trip paid by Card",
           "request": {
             "method": "POST",
             "header": [
@@ -1153,7 +1153,7 @@
             "url": "{{baseUrl}}/api/trips/",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"paymentMethod\": \"Card\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1170,7 +1170,7 @@
                   "const expected = [201];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.riderId).to.eql(pm.collectionVariables.get('riderId')); pm.expect([0,'Requested']).to.include(data.status); pm.expect(data.fareEstimate).to.be.a('number').and.above(0); pm.collectionVariables.set('tripId', data.id); pm.collectionVariables.set('fareEstimate', data.fareEstimate); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.riderId).to.eql(pm.collectionVariables.get('riderId')); pm.expect([0,'Requested']).to.include(data.status); pm.expect(data.fareEstimate).to.be.a('number').and.above(0); pm.expect(data.paymentMethod).to.eql('Card'); pm.collectionVariables.set('tripId', data.id); pm.collectionVariables.set('fareEstimate', data.fareEstimate); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }
@@ -1199,7 +1199,7 @@
             "url": "{{baseUrl}}/api/trips/",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"paymentMethod\": \"Card\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1245,7 +1245,7 @@
             "url": "{{baseUrl}}/api/trips/",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Changed destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Changed destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"paymentMethod\": \"Card\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1269,7 +1269,99 @@
           ]
         },
         {
-          "name": "27 Other Rider cannot read Trip",
+          "name": "27 Same key with Wallet instead of Card rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"paymentMethod\": \"Wallet\",\n  \"idempotencyKey\": \"postman-{{runId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [409];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().error).to.include('IdempotencyKey'); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "28 Unsupported payment method rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/trips/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riderId\": \"00000000-0000-0000-0000-000000000000\",\n  \"pickupAddress\": \"Postman pickup {{runId}}\",\n  \"dropoffAddress\": \"Postman destination\",\n  \"pickupLatitude\": 10.77,\n  \"pickupLongitude\": 106.69,\n  \"distance\": 2,\n  \"estimatedTime\": 5,\n  \"rideType\": \"standard\",\n  \"paymentMethod\": \"Cash\",\n  \"idempotencyKey\": \"postman-{{runId}}-cash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const expected = [400];",
+                  "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
+                  "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().error).to.include('Wallet hoặc Card'); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "29 Other Rider cannot read Trip",
           "request": {
             "method": "GET",
             "header": [],
@@ -1301,7 +1393,7 @@
           ]
         },
         {
-          "name": "28 Other Rider cannot cancel Trip",
+          "name": "30 Other Rider cannot cancel Trip",
           "request": {
             "method": "POST",
             "header": [
@@ -1347,7 +1439,7 @@
           ]
         },
         {
-          "name": "29 Accept before invitation rejected",
+          "name": "31 Accept before invitation rejected",
           "request": {
             "method": "POST",
             "header": [
@@ -1393,7 +1485,7 @@
           ]
         },
         {
-          "name": "30 Confirm price starts matching",
+          "name": "32 Confirm price starts matching",
           "request": {
             "method": "POST",
             "header": [
@@ -1444,7 +1536,7 @@
       "name": "05 - Driver lifecycle",
       "item": [
         {
-          "name": "31 Poll invitation",
+          "name": "33 Poll invitation",
           "request": {
             "method": "GET",
             "header": [],
@@ -1494,7 +1586,7 @@
           ]
         },
         {
-          "name": "32 Uninvited Driver cannot accept",
+          "name": "34 Uninvited Driver cannot accept",
           "request": {
             "method": "POST",
             "header": [
@@ -1540,7 +1632,7 @@
           ]
         },
         {
-          "name": "33 Accept invitation",
+          "name": "35 Accept invitation",
           "request": {
             "method": "POST",
             "header": [
@@ -1586,7 +1678,7 @@
           ]
         },
         {
-          "name": "34 Duplicate accept rejected",
+          "name": "36 Duplicate accept rejected",
           "request": {
             "method": "POST",
             "header": [
@@ -1632,7 +1724,7 @@
           ]
         },
         {
-          "name": "35 Driver active Trip",
+          "name": "37 Driver active Trip",
           "request": {
             "method": "GET",
             "header": [],
@@ -1664,7 +1756,7 @@
           ]
         },
         {
-          "name": "36 Rider cannot drive state transition",
+          "name": "38 Rider cannot drive state transition",
           "request": {
             "method": "POST",
             "header": [
@@ -1710,7 +1802,7 @@
           ]
         },
         {
-          "name": "37 Enroute",
+          "name": "39 Enroute",
           "request": {
             "method": "POST",
             "header": [
@@ -1756,7 +1848,7 @@
           ]
         },
         {
-          "name": "38 Pickup",
+          "name": "40 Pickup",
           "request": {
             "method": "POST",
             "header": [
@@ -1802,7 +1894,7 @@
           ]
         },
         {
-          "name": "39 Dropoff starts payment",
+          "name": "41 Dropoff starts payment",
           "request": {
             "method": "POST",
             "header": [
@@ -1853,7 +1945,7 @@
       "name": "06 - Payment",
       "item": [
         {
-          "name": "40 Poll until Paid",
+          "name": "42 Poll until Paid",
           "request": {
             "method": "GET",
             "header": [],
@@ -1903,7 +1995,7 @@
           ]
         },
         {
-          "name": "41 Payment by Trip",
+          "name": "43 Payment by Trip",
           "request": {
             "method": "GET",
             "header": [],
@@ -1928,14 +2020,14 @@
                   "const expected = [200];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.tripId).to.eql(pm.collectionVariables.get('tripId')); pm.expect(data.status).to.eql('Succeeded'); pm.expect(data.amount).to.eql(Number(pm.collectionVariables.get('fareEstimate'))); pm.expect(data.idempotencyKey).to.eql('trip-' + pm.collectionVariables.get('tripId').replace(/-/g,'') + '-payment-v1'); pm.collectionVariables.set('paymentId', data.id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { const data = pm.response.json(); pm.expect(data.paymentMethod).to.eql('Card'); pm.expect(data.tripId).to.eql(pm.collectionVariables.get('tripId')); pm.expect(data.status).to.eql('Succeeded'); pm.expect(data.amount).to.eql(Number(pm.collectionVariables.get('fareEstimate'))); pm.expect(data.idempotencyKey).to.eql('trip-' + pm.collectionVariables.get('tripId').replace(/-/g,'') + '-payment-v1'); pm.collectionVariables.set('paymentId', data.id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "42 Payment by ID",
+          "name": "44 Payment by ID",
           "request": {
             "method": "GET",
             "header": [],
@@ -1960,14 +2052,14 @@
                   "const expected = [200];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('paymentId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().paymentMethod).to.eql('Card'); pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('paymentId')); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "43 Other Rider cannot read Payment",
+          "name": "45 Other Rider cannot read Payment",
           "request": {
             "method": "GET",
             "header": [],
@@ -1999,7 +2091,7 @@
           ]
         },
         {
-          "name": "44 Rider cannot refund",
+          "name": "46 Rider cannot refund",
           "request": {
             "method": "POST",
             "header": [
@@ -2045,7 +2137,7 @@
           ]
         },
         {
-          "name": "45 Rider cannot force Paid",
+          "name": "47 Rider cannot force Paid",
           "request": {
             "method": "POST",
             "header": [
@@ -2091,7 +2183,7 @@
           ]
         },
         {
-          "name": "46 Admin refunds Payment",
+          "name": "48 Admin refunds Payment",
           "request": {
             "method": "POST",
             "header": [
@@ -2137,7 +2229,7 @@
           ]
         },
         {
-          "name": "47 Duplicate refund rejected",
+          "name": "49 Duplicate refund rejected",
           "request": {
             "method": "POST",
             "header": [
@@ -2183,7 +2275,7 @@
           ]
         },
         {
-          "name": "48 Rider sees Refunded Payment",
+          "name": "50 Rider sees Refunded Payment",
           "request": {
             "method": "GET",
             "header": [],
@@ -2220,7 +2312,7 @@
       "name": "07 - Driver reject and reassignment",
       "item": [
         {
-          "name": "49 Seeded Driver online for reject scenario",
+          "name": "51 Seeded Driver online for reject scenario",
           "request": {
             "method": "POST",
             "header": [
@@ -2266,7 +2358,7 @@
           ]
         },
         {
-          "name": "50 Create Trip for reject scenario",
+          "name": "52 Create Trip for reject scenario",
           "request": {
             "method": "POST",
             "header": [
@@ -2312,7 +2404,7 @@
           ]
         },
         {
-          "name": "51 Confirm price for reject scenario",
+          "name": "53 Confirm price for reject scenario",
           "request": {
             "method": "POST",
             "header": [
@@ -2358,7 +2450,7 @@
           ]
         },
         {
-          "name": "52 Poll first invitation (seeded Driver)",
+          "name": "54 Poll first invitation (seeded Driver)",
           "request": {
             "method": "GET",
             "header": [],
@@ -2408,7 +2500,7 @@
           ]
         },
         {
-          "name": "53 Second Driver online as next candidate",
+          "name": "55 Second Driver online as next candidate",
           "request": {
             "method": "POST",
             "header": [
@@ -2454,7 +2546,7 @@
           ]
         },
         {
-          "name": "54 Seeded Driver rejects invitation",
+          "name": "56 Seeded Driver rejects invitation",
           "request": {
             "method": "POST",
             "header": [
@@ -2500,7 +2592,7 @@
           ]
         },
         {
-          "name": "55 Rejected Driver cannot accept anymore",
+          "name": "57 Rejected Driver cannot accept anymore",
           "request": {
             "method": "POST",
             "header": [
@@ -2546,7 +2638,7 @@
           ]
         },
         {
-          "name": "56 Poll reassigned invitation (second Driver)",
+          "name": "58 Poll reassigned invitation (second Driver)",
           "request": {
             "method": "GET",
             "header": [],
@@ -2596,7 +2688,7 @@
           ]
         },
         {
-          "name": "57 Trip still waiting for Driver after reject",
+          "name": "59 Trip still waiting for Driver after reject",
           "request": {
             "method": "GET",
             "header": [],
@@ -2628,7 +2720,7 @@
           ]
         },
         {
-          "name": "58 Owner cancels reassigned Trip",
+          "name": "60 Owner cancels reassigned Trip",
           "request": {
             "method": "POST",
             "header": [
@@ -2674,7 +2766,7 @@
           ]
         },
         {
-          "name": "59 Verify reassigned Trip Cancelled",
+          "name": "61 Verify reassigned Trip Cancelled",
           "request": {
             "method": "GET",
             "header": [],
@@ -2706,7 +2798,7 @@
           ]
         },
         {
-          "name": "60 Second Driver offline after reject scenario",
+          "name": "62 Second Driver offline after reject scenario",
           "request": {
             "method": "POST",
             "header": [
@@ -2757,7 +2849,7 @@
       "name": "08 - Cancel",
       "item": [
         {
-          "name": "61 Create cancellable Trip",
+          "name": "63 Create cancellable Trip",
           "request": {
             "method": "POST",
             "header": [
@@ -2796,14 +2888,14 @@
                   "const expected = [201];",
                   "pm.test('HTTP status matches contract', function () { pm.expect(expected).to.include(pm.response.code); });",
                   "if (!expected.includes(pm.response.code)) { pm.execution.setNextRequest(null); }",
-                  "else { pm.test('Response matches business contract', function () { try { pm.collectionVariables.set('cancelTripId', pm.response.json().id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
+                  "else { pm.test('Response matches business contract', function () { try { pm.expect(pm.response.json().paymentMethod).to.eql('Wallet'); pm.collectionVariables.set('cancelTripId', pm.response.json().id); } catch (error) { pm.execution.setNextRequest(null); throw error; } }); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "62 Owner cancels Requested Trip",
+          "name": "64 Owner cancels Requested Trip",
           "request": {
             "method": "POST",
             "header": [
@@ -2849,7 +2941,7 @@
           ]
         },
         {
-          "name": "63 Verify Cancelled",
+          "name": "65 Verify Cancelled",
           "request": {
             "method": "GET",
             "header": [],
@@ -2881,7 +2973,7 @@
           ]
         },
         {
-          "name": "64 Cancelled Trip has no payment",
+          "name": "66 Cancelled Trip has no payment",
           "request": {
             "method": "GET",
             "header": [],
@@ -2913,7 +3005,7 @@
           ]
         },
         {
-          "name": "65 Confirm price after cancel rejected",
+          "name": "67 Confirm price after cancel rejected",
           "request": {
             "method": "POST",
             "header": [
@@ -2959,7 +3051,7 @@
           ]
         },
         {
-          "name": "66 Cancelled Trip unchanged after invalid action",
+          "name": "68 Cancelled Trip unchanged after invalid action",
           "request": {
             "method": "GET",
             "header": [],
@@ -2996,7 +3088,7 @@
       "name": "09 - Refresh and logout",
       "item": [
         {
-          "name": "67 Rotate Rider refresh token",
+          "name": "69 Rotate Rider refresh token",
           "request": {
             "method": "POST",
             "header": [
@@ -3046,7 +3138,7 @@
           ]
         },
         {
-          "name": "68 Refreshed session works",
+          "name": "70 Refreshed session works",
           "request": {
             "method": "GET",
             "header": [],
@@ -3078,7 +3170,7 @@
           ]
         },
         {
-          "name": "69 Logout ends Keycloak session",
+          "name": "71 Logout ends Keycloak session",
           "request": {
             "method": "POST",
             "header": [
@@ -3123,7 +3215,7 @@
           ]
         },
         {
-          "name": "70 Revoked refresh rejected",
+          "name": "72 Revoked refresh rejected",
           "request": {
             "method": "POST",
             "header": [
@@ -3178,7 +3270,7 @@
       "name": "10 - Cleanup",
       "item": [
         {
-          "name": "71 Driver offline",
+          "name": "73 Driver offline",
           "request": {
             "method": "POST",
             "header": [
@@ -3224,7 +3316,7 @@
           ]
         },
         {
-          "name": "72 Logout Driver",
+          "name": "74 Logout Driver",
           "request": {
             "method": "POST",
             "header": [
@@ -3269,7 +3361,7 @@
           ]
         },
         {
-          "name": "73 Logout other Driver",
+          "name": "75 Logout other Driver",
           "request": {
             "method": "POST",
             "header": [
@@ -3314,7 +3406,7 @@
           ]
         },
         {
-          "name": "74 Logout other Rider",
+          "name": "76 Logout other Rider",
           "request": {
             "method": "POST",
             "header": [
@@ -3359,7 +3451,7 @@
           ]
         },
         {
-          "name": "75 Logout Admin",
+          "name": "77 Logout Admin",
           "request": {
             "method": "POST",
             "header": [

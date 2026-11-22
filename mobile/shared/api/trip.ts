@@ -25,7 +25,18 @@ export type TripDto = {
   fareEstimate: number | null; status: number | string; createdAt: string; updatedAt: string | null;
   paymentFailureReason?: string | null; declineCount?: number; declineThreshold?: number | null;
   pickupLatitude?: number | null; pickupLongitude?: number | null; dropoffLatitude?: number | null; dropoffLongitude?: number | null;
+  paymentMethod?: string;
 };
+
+/** Payment methods the Rider can choose when booking; names match Trip/Payment ("Wallet" | "Card"). */
+export const paymentMethods = ['Wallet', 'Card'] as const;
+export type PaymentMethod = typeof paymentMethods[number];
+/** Label for a method sent by the server; older trips without one were paid from the wallet. */
+export function paymentMethodText(value: string | null | undefined): string {
+  if (value === undefined || value === null || value === 'Wallet') return 'Ví SwiftRide';
+  if (value === 'Card') return 'Thẻ';
+  return value;
+}
 export type QuoteDto = { base: number; distance: number; time: number; surge: number; toll: number; discount: number; tax: number; total: number };
 export type InvitationDto = {
   id: string; expiresAtUtc: string; pickupAddress: string; dropoffAddress: string; fareEstimate: number | null;

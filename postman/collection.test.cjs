@@ -40,7 +40,7 @@ function execute(prefix, body, { code = 200, values = {}, now = 1000, event = 't
     return { state, failures, next, name: item.name };
 }
 test('Collection has unique names, Gateway or Keycloak URLs, no persisted tokens and valid script syntax', () => {
-    assert.equal(requests.length, 76);
+    assert.equal(requests.length, 78);
     assert.equal(new Set(requests.map(item => item.name)).size, requests.length);
     assert.deepEqual(collection.variable, []);
     for (const item of requests) {
@@ -78,6 +78,28 @@ test('In-app sign-up goes through the Gateway and must create a Rider for this r
     const taken = execute('03 ', {}, { code: 409, values: { runId: 'run' } });
     assert.equal(taken.next, null);
 });
+test('Main Trip is paid by Card end to end; the method is part of the idempotent payload', () => {
+    const body = prefix => JSON.parse(requests.find(request => request.name.startsWith(prefix)).request.body.raw);
+    assert.equal(body('24 ').paymentMethod, 'Card');
+    assert.equal(body('25 ').paymentMethod, 'Card');
+    assert.equal(body('27 ').paymentMethod, 'Wallet');
+    assert.equal(body('27 ').idempotencyKey, body('24 ').idempotencyKey);
+    assert.equal(body('28 ').paymentMethod, 'Cash');
+    assert.notEqual(body('28 ').idempotencyKey, body('24 ').idempotencyKey);
+    assert.equal(body('63 ').paymentMethod, undefined, 'cancel scenario keeps the default (Wallet)');
+    const trip = { riderId: 'rider', status: 'Requested', fareEstimate: 44, id: 'trip' };
+    assert.deepEqual(execute('24 ', { ...trip, paymentMethod: 'Card' }, { code: 201, values: { riderId: 'rider' } }).failures, []);
+    assert.equal(execute('24 ', { ...trip, paymentMethod: 'Wallet' }, { code: 201, values: { riderId: 'rider' } }).failures.length, 1);
+    assert.deepEqual(execute('27 ', { error: 'IdempotencyKey đã được sử dụng với payload khác.' }, { code: 409 }).failures, []);
+    assert.equal(execute('27 ', {}, { code: 201 }).next, null);
+    assert.deepEqual(execute('28 ', { error: 'Phương thức thanh toán chỉ nhận Wallet hoặc Card.' }, { code: 400 }).failures, []);
+    const payment = { tripId: 'trip', status: 'Succeeded', amount: 44, idempotencyKey: 'trip-trip-payment-v1', id: 'pay' };
+    const values = { tripId: 'trip', fareEstimate: 44, paymentId: 'pay' };
+    assert.deepEqual(execute('43 ', { ...payment, paymentMethod: 'Card' }, { values }).failures, []);
+    assert.equal(execute('43 ', { ...payment, paymentMethod: 'Wallet' }, { values }).failures.length, 1);
+    assert.deepEqual(execute('44 ', { id: 'pay', paymentMethod: 'Card' }, { values }).failures, []);
+    assert.deepEqual(execute('63 ', { id: 'c', paymentMethod: 'Wallet' }, { code: 201 }).failures, []);
+});
 test('Login captures tokens only on successful response', () => {
     const valid = execute('04 ', { access_token: 'token', refresh_token: 'refresh', token_type: 'Bearer' });
     assert.equal(valid.state.get('riderToken'), 'token');
@@ -88,33 +110,33 @@ test('Login captures tokens only on successful response', () => {
     assert.equal(invalid.failures.length, 1);
 });
 test('Invitation polling repeats, then clears deadline only for matching Trip', () => {
-    const pending = execute('31 ', [{ id: 'other' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
+    const pending = execute('33 ', [{ id: 'other' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
     assert.equal(pending.next, pending.name);
-    const ready = execute('31 ', [{ id: 'trip' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
+    const ready = execute('33 ', [{ id: 'trip' }], { values: { tripId: 'trip', invitationDeadline: 2000 } });
     assert.equal(ready.next, undefined);
     assert.equal(ready.state.has('invitationDeadline'), false);
     assert.deepEqual(ready.failures, []);
 });
 test('Invitation timeout fails and stops instead of reporting success', () => {
-    const result = execute('31 ', [], { values: { tripId: 'trip', invitationDeadline: 999 } });
+    const result = execute('33 ', [], { values: { tripId: 'trip', invitationDeadline: 999 } });
     assert.equal(result.next, null);
     assert.equal(result.failures.length, 1);
 });
 test('Poll pre-request keeps original deadline across retries', () => {
-    const first = execute('40 ', {}, { event: 'prerequest' });
+    const first = execute('42 ', {}, { event: 'prerequest' });
     assert.equal(first.state.get('paymentDeadline'), 46000);
-    const retry = execute('40 ', {}, { event: 'prerequest', now: 2000, values: { paymentDeadline: 46000 } });
+    const retry = execute('42 ', {}, { event: 'prerequest', now: 2000, values: { paymentDeadline: 46000 } });
     assert.equal(retry.state.get('paymentDeadline'), 46000);
 });
 test('Payment poll accepts numeric and string Paid states', () => {
     for (const status of [7, 'Paid']) {
-        const result = execute('40 ', { status }, { values: { paymentDeadline: 2000 } });
+        const result = execute('42 ', { status }, { values: { paymentDeadline: 2000 } });
         assert.deepEqual(result.failures, []);
         assert.equal(result.state.has('paymentDeadline'), false);
     }
 });
 test('Payment pending retries; terminal failure, timeout and HTTP error stop', () => {
-    const pending = execute('40 ', { status: 6 }, { values: { paymentDeadline: 2000 } });
+    const pending = execute('42 ', { status: 6 }, { values: { paymentDeadline: 2000 } });
     assert.equal(pending.next, pending.name);
     for (const options of [
         { body: { status: 'Failed' }, values: { paymentDeadline: 2000 } },
@@ -122,13 +144,13 @@ test('Payment pending retries; terminal failure, timeout and HTTP error stop', (
         { body: { status: 6 }, values: { paymentDeadline: 999 } },
         { body: {}, code: 500 }
     ]) {
-        const result = execute('40 ', options.body, options);
+        const result = execute('42 ', options.body, options);
         assert.equal(result.next, null);
         assert.equal(result.failures.length, 1);
     }
 });
 test('Wrong payment amount or key stops flow', () => {
-    const result = execute('41 ', { tripId: 'trip', status: 'Succeeded', amount: 999 }, { values: { tripId: 'trip', fareEstimate: 50000 } });
+    const result = execute('43 ', { tripId: 'trip', status: 'Succeeded', amount: 999 }, { values: { tripId: 'trip', fareEstimate: 50000 } });
     assert.equal(result.next, null);
     assert.equal(result.failures.length, 1);
 });
@@ -159,25 +181,25 @@ test('Admin login stores Admin session only', () => {
 });
 test('Admin refund must return Refunded payment with Trip fare', () => {
     const values = { paymentId: 'pay', tripId: 'trip', fareEstimate: '50000' };
-    assert.deepEqual(execute('46 ', { paymentId: 'pay', tripId: 'trip', status: 'Refunded', amount: 50000 }, { values }).failures, []);
-    const wrong = execute('46 ', { paymentId: 'pay', tripId: 'trip', status: 'Succeeded', amount: 50000 }, { values });
+    assert.deepEqual(execute('48 ', { paymentId: 'pay', tripId: 'trip', status: 'Refunded', amount: 50000 }, { values }).failures, []);
+    const wrong = execute('48 ', { paymentId: 'pay', tripId: 'trip', status: 'Succeeded', amount: 50000 }, { values });
     assert.equal(wrong.next, null);
     assert.equal(wrong.failures.length, 1);
-    assert.equal(execute('47 ', {}, { code: 200 }).next, null);
+    assert.equal(execute('49 ', {}, { code: 200 }).next, null);
 });
 test('Reject scenario polls each Driver for the reject Trip with separate deadlines', () => {
-    const first = execute('52 ', [{ id: 'reject' }], { values: { tripId: 'main', rejectTripId: 'reject', rejectInvitationDeadline: 2000 } });
+    const first = execute('54 ', [{ id: 'reject' }], { values: { tripId: 'main', rejectTripId: 'reject', rejectInvitationDeadline: 2000 } });
     assert.equal(first.next, undefined);
     assert.equal(first.state.has('rejectInvitationDeadline'), false);
-    const waiting = execute('56 ', [{ id: 'main' }], { values: { tripId: 'main', rejectTripId: 'reject', reassignInvitationDeadline: 2000 } });
+    const waiting = execute('58 ', [{ id: 'main' }], { values: { tripId: 'main', rejectTripId: 'reject', reassignInvitationDeadline: 2000 } });
     assert.equal(waiting.next, waiting.name);
-    const timedOut = execute('56 ', [], { values: { rejectTripId: 'reject', reassignInvitationDeadline: 999 } });
+    const timedOut = execute('58 ', [], { values: { rejectTripId: 'reject', reassignInvitationDeadline: 999 } });
     assert.equal(timedOut.next, null);
     assert.equal(timedOut.failures.length, 1);
 });
 test('Reassigned Trip must still be unassigned and waiting', () => {
-    assert.deepEqual(execute('57 ', { status: 'PriceConfirmed', driverId: null, declineCount: 1, declineThreshold: 2 }).failures, []);
-    const accepted = execute('57 ', { status: 'DriverAccepted', driverId: 'driver' });
+    assert.deepEqual(execute('59 ', { status: 'PriceConfirmed', driverId: null, declineCount: 1, declineThreshold: 2 }).failures, []);
+    const accepted = execute('59 ', { status: 'DriverAccepted', driverId: 'driver' });
     assert.equal(accepted.next, null);
     assert.equal(accepted.failures.length, 1);
 });
@@ -191,15 +213,15 @@ test('Identity comes from Keycloak userinfo; Rider token must not carry Driver/A
     assert.equal(execute('11 ', { sub: 'driver-sub', role: ['Driver'] }).state.get('driverId'), 'driver-sub');
 });
 test('Revoked Keycloak refresh token must fail with invalid_grant', () => {
-    assert.deepEqual(execute('70 ', { error: 'invalid_grant' }, { code: 400 }).failures, []);
-    assert.equal(execute('70 ', { access_token: 'x' }, { code: 200 }).next, null);
+    assert.deepEqual(execute('72 ', { error: 'invalid_grant' }, { code: 400 }).failures, []);
+    assert.equal(execute('72 ', { access_token: 'x' }, { code: 200 }).next, null);
 });
 test('Cancelled Trip: invalid action must leave status and updatedAt unchanged', () => {
     const values = { cancelUpdatedAt: '2026-11-16T10:00:00Z' };
-    assert.deepEqual(execute('63 ', { status: 'Cancelled', updatedAt: '2026-11-16T10:00:00Z' }).state.get('cancelUpdatedAt'), '2026-11-16T10:00:00Z');
-    assert.deepEqual(execute('66 ', { status: 8, updatedAt: '2026-11-16T10:00:00Z', driverId: null }, { values }).failures, []);
-    const changed = execute('66 ', { status: 8, updatedAt: '2026-11-16T10:05:00Z', driverId: null }, { values });
+    assert.deepEqual(execute('65 ', { status: 'Cancelled', updatedAt: '2026-11-16T10:00:00Z' }).state.get('cancelUpdatedAt'), '2026-11-16T10:00:00Z');
+    assert.deepEqual(execute('68 ', { status: 8, updatedAt: '2026-11-16T10:00:00Z', driverId: null }, { values }).failures, []);
+    const changed = execute('68 ', { status: 8, updatedAt: '2026-11-16T10:05:00Z', driverId: null }, { values });
     assert.equal(changed.next, null);
     assert.equal(changed.failures.length, 1);
-    assert.equal(execute('64 ', {}, { code: 200 }).next, null);
+    assert.equal(execute('66 ', {}, { code: 200 }).next, null);
 });

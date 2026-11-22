@@ -15,6 +15,7 @@ using SwiftRide.TripService.Domain.Entities;
 using SwiftRide.TripService.Domain.Interfaces;
 using Xunit;
 using SwiftRide.Contracts.Payments;
+using SwiftRide.Contracts.Trips;
 
 namespace SwiftRide.TripService.Tests;
 
@@ -77,6 +78,88 @@ public class TripApplicationServiceTests
         Assert.Contains("điểm đến", error.Message);
         _pricingMock.Verify(x => x.GetQuoteAsync(It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // --- Phương thức thanh toán (Wallet/Card) ---
+
+    [Theory]
+    [InlineData(null, "Wallet")]
+    [InlineData("Wallet", "Wallet")]
+    [InlineData("card", "Card")]
+    [InlineData(" Card ", "Card")]
+    public async Task CreateAsync_PaymentMethod_StoredNormalizedAndReturned(string? requested, string expected)
+    {
+        _pricingMock.Setup(x => x.GetQuoteAsync(It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MatchingQuoteResponse(0, 30, 10, 0, 0, 0, 4, 44));
+        Trip? saved = null;
+        _writerMock.Setup(x => x.AddAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()))
+            .Callback<Trip, CancellationToken>((trip, _) => saved = trip);
+
+        var response = await _service.CreateAsync(new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.76, 106.68, 2m, 5m,
+            PaymentMethod: requested), TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, saved!.PaymentMethod);
+        Assert.Equal(expected, response.PaymentMethod);
+    }
+
+    [Theory]
+    [InlineData("Cash")]
+    [InlineData("Momo")]
+    [InlineData("Wallet;Card")]
+    public async Task CreateAsync_UnsupportedPaymentMethod_RejectedBeforePricing(string method)
+    {
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.76, 106.68, 2m, 5m, PaymentMethod: method);
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => _service.CreateAsync(request, CancellationToken.None));
+        Assert.Contains("Wallet hoặc Card", error.Message);
+        _pricingMock.Verify(x => x.GetQuoteAsync(It.IsAny<MatchingQuoteRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _writerMock.Verify(x => x.AddAsync(It.IsAny<Trip>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAsync_IdempotencyHash_WalletKeepsOldHash_CardIsADifferentPayload()
+    {
+        const string key = "key-payment-method";
+        var request = new CreateTripRequest(Guid.NewGuid(), "A", "B", 10.0, 106.0, 5m, 10m, "Moto", null, key);
+        // Hash stored before payment methods existed (no PaymentMethod field).
+        var oldHash = ComputeHash(new
+        {
+            request.RiderId, request.PickupAddress, request.DropoffAddress, request.PickupLatitude, request.PickupLongitude,
+            request.Distance, request.EstimatedTime, request.RideType, request.PromoCode
+        });
+        var existing = Trip.Create(request.RiderId, "A", "B", 50000m, 10.0, 106.0, key, oldHash);
+        _readerMock.Setup(x => x.GetByIdempotencyKeyAsync(key, It.IsAny<CancellationToken>())).ReturnsAsync(existing);
+
+        Assert.Equal(existing.Id, (await _service.CreateAsync(request with { PaymentMethod = "Wallet" }, CancellationToken.None)).Id);
+        Assert.Equal(existing.Id, (await _service.CreateAsync(request, CancellationToken.None)).Id);
+        var conflict = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.CreateAsync(request with { PaymentMethod = "Card" }, CancellationToken.None));
+        Assert.Contains("IdempotencyKey đã được sử dụng", conflict.Message);
+    }
+
+    [Theory]
+    [InlineData("Wallet")]
+    [InlineData("Card")]
+    public async Task DropoffAsync_SendsTheMethodChosenAtBooking(string method)
+    {
+        var tripId = Guid.NewGuid();
+        var trip = Trip.Create(Guid.NewGuid(), "A", "B", 44m, paymentMethod: method);
+        trip.ConfirmPrice(); trip.AcceptByDriver(Guid.NewGuid()); trip.StartEnRoute(); trip.Pickup();
+        _readerMock.Setup(x => x.GetByIdAsync(tripId, It.IsAny<CancellationToken>())).ReturnsAsync(trip);
+        _uowMock.Setup(x => x.ExecuteAsync(It.IsAny<Func<CancellationToken, Task<TripResponse>>>(), It.IsAny<CancellationToken>()))
+            .Returns<Func<CancellationToken, Task<TripResponse>>, CancellationToken>((operation, ct) => operation(ct));
+        TripDroppedOffV1? published = null;
+        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<TripDroppedOffV1>(), It.IsAny<CancellationToken>()))
+            .Callback<TripDroppedOffV1, CancellationToken>((message, _) => published = message)
+            .Returns(Task.CompletedTask);
+
+        await _service.DropoffAsync(tripId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(method, published!.PaymentMethod);
+    }
+
+    [Fact]
+    public void TripCreate_RejectsUnknownMethod() =>
+        Assert.Throws<ArgumentException>(() => Trip.Create(Guid.NewGuid(), "A", "B", 44m, paymentMethod: "Cash"));
 
     // --- KỊCH BẢN 1: TEST IDEMPOTENCY ---
 

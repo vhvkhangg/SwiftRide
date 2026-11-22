@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SwiftRide.PaymentService.Domain.Entities;
+using SwiftRide.PaymentService.Domain.Enums;
 
 namespace SwiftRide.PaymentService.Infrastructure.Persistence.Configurations;
 
@@ -21,6 +22,9 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
             .HasMaxLength(128).IsRequired();
         builder.Property(x => x.PayeeAccount).HasColumnName("payee_account")
             .HasMaxLength(128).IsRequired();
+        // Rows created before payment methods existed were wallet payments.
+        builder.Property(x => x.PaymentMethod).HasColumnName("payment_method")
+            .HasConversion<string>().HasMaxLength(16).HasDefaultValue(PaymentMethodType.Wallet).IsRequired();
         builder.Property(x => x.IsTripSynced).HasColumnName("is_trip_synced")
             .HasDefaultValue(false).IsRequired();
         builder.Property(x => x.FailureCode)

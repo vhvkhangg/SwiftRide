@@ -11,6 +11,8 @@ public class Payment
     public string IdempotencyKey { get; private set; } = string.Empty;
     public string PayerAccount { get; private set; } = string.Empty;
     public string PayeeAccount { get; private set; } = string.Empty;
+    /// <summary>Phương thức đã dùng để thu tiền (Wallet/Card); bản ghi cũ là Wallet.</summary>
+    public PaymentMethodType PaymentMethod { get; private set; } = PaymentMethodType.Wallet;
     public bool IsTripSynced { get; private set; }
     public string? FailureCode { get; private set; }
     public string? FailureReason { get; private set; }
@@ -20,7 +22,7 @@ public class Payment
 
     private Payment() { }
 
-    private Payment(Guid tripId, decimal amount, string key, string payer, string payee)
+    private Payment(Guid tripId, decimal amount, string key, string payer, string payee, PaymentMethodType method)
     {
         Id = Guid.NewGuid();
         TripId = tripId;
@@ -28,6 +30,7 @@ public class Payment
         IdempotencyKey = key;
         PayerAccount = payer;
         PayeeAccount = payee;
+        PaymentMethod = method;
         Status = PaymentStatus.Pending;
         IsTripSynced = false;
         Version = 0;
@@ -35,7 +38,7 @@ public class Payment
     }
 
     public static Payment Create(Guid tripId, decimal amount, string idempotencyKey,
-        string payerAccount, string payeeAccount)
+        string payerAccount, string payeeAccount, PaymentMethodType paymentMethod = PaymentMethodType.Wallet)
     {
         if (tripId == Guid.Empty)
             throw new ArgumentException("ID chuyến đi không được để trống.", nameof(tripId));
@@ -45,7 +48,9 @@ public class Payment
         ValidateText(idempotencyKey, nameof(idempotencyKey));
         ValidateText(payerAccount, nameof(payerAccount));
         ValidateText(payeeAccount, nameof(payeeAccount));
-        return new Payment(tripId, amount, idempotencyKey, payerAccount, payeeAccount);
+        if (!Enum.IsDefined(paymentMethod))
+            throw new ArgumentOutOfRangeException(nameof(paymentMethod), "Phương thức thanh toán không được hỗ trợ.");
+        return new Payment(tripId, amount, idempotencyKey, payerAccount, payeeAccount, paymentMethod);
     }
 
     private static void ValidateText(string value, string parameter)

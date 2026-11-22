@@ -280,6 +280,14 @@ namespace SwiftRide.PaymentService.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("payer_account");
 
+                    b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Wallet")
+                        .HasColumnName("payment_method");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)

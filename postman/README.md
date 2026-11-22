@@ -2,9 +2,9 @@
 
 ## Pham vi
 
-Collection co 76 request: readiness, Keycloak discovery, dang ky Rider trong app qua Gateway (`POST /api/auth/register`, email moi moi lan chay), dang nhap qua Keycloak (Rider, Driver, Admin), role isolation, token gia/het han, quote, GPS, Trip idempotency, invitation/accept, enroute/pickup/dropoff, cho Paid, doc Payment, Admin refund, Driver reject doi ung vien, cancel, refresh/logout. Token lay tu Keycloak (`{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/*`, client dev-only `swiftride-postman`, password grant); API nghiep vu chi goi qua API Gateway. Khong ep trang thai noi bo hoac tao Payment lan hai.
+Collection co 78 request: readiness, Keycloak discovery, dang ky Rider trong app qua Gateway (`POST /api/auth/register`, email moi moi lan chay), dang nhap qua Keycloak (Rider, Driver, Admin), role isolation, token gia/het han, quote, GPS, Trip idempotency, phuong thuc thanh toan (chuyen chinh tra bang Card; Cash bi 400; doi Card sang Wallet cung key bi 409), invitation/accept, enroute/pickup/dropoff, cho Paid, doc Payment, Admin refund, Driver reject doi ung vien, cancel, refresh/logout. Token lay tu Keycloak (`{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/*`, client dev-only `swiftride-postman`, password grant); API nghiep vu chi goi qua API Gateway. Khong ep trang thai noi bo hoac tao Payment lan hai.
 
-Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, tao 3 Trip va 1 Payment (Payment bi refund o cuoi luong); doi online/offline cua 2 Driver demo. Khong xoa du lieu/volume. Neu run dung giua chung, xu ly Trip con dang chay va dat Driver offline bang request 71 va 60 (hoac 22). Khong export collection sau run kem token that.
+Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, tao 3 Trip va 1 Payment (Payment bi refund o cuoi luong); doi online/offline cua 2 Driver demo. Khong xoa du lieu/volume. Neu run dung giua chung, xu ly Trip con dang chay va dat Driver offline bang request 73 va 62 (hoac 22). Khong export collection sau run kem token that.
 
 ## Chuan bi backend
 
@@ -17,12 +17,12 @@ Canh bao: chi chay tren dev/test rieng. Moi lan chay dung 2 Rider demo co san, t
 
 1. Import `SwiftRide.postman_collection.json` va `SwiftRide.local.postman_environment.json`.
 2. Chon environment **SwiftRide Local**. Sua `baseUrl` neu can, khong co dau `/` cuoi; mac dinh `http://localhost:5100`.
-3. Mo Collection Runner, chon **toan bo collection**, **1 iteration**, chay tu 00 den 75, dat **Delay 500 ms**. Khong chay song song.
+3. Mo Collection Runner, chon **toan bo collection**, **1 iteration**, chay tu 00 den 77, dat **Delay 500 ms**. Khong chay song song.
 4. Xem ket qua assertions. Token, Trip ID, Payment ID duoc lay tu response va luu trong collection variables; environment chi giu config.
 
-Nut Send chi gui mot request. `setNextRequest` chi dieu khien flow trong Runner/Newman. Request 31, 52, 56 lap cho invitation va request 40 lap cho Paid, toi da `pollTimeoutSeconds` (mac dinh 45, cho phep 5..120). Sau loi HTTP hoac assertion, Runner dung; khong coi request 202 la da thanh toan. Keycloak khoa tam tai khoan sau 10 lan sai mat khau lien tiep (brute-force protection), tu mo sau toi da 15 phut.
+Nut Send chi gui mot request. `setNextRequest` chi dieu khien flow trong Runner/Newman. Request 33, 54, 58 lap cho invitation va request 42 lap cho Paid, toi da `pollTimeoutSeconds` (mac dinh 45, cho phep 5..120). Sau loi HTTP hoac assertion, Runner dung; khong coi request 202 la da thanh toan. Keycloak khoa tam tai khoan sau 10 lan sai mat khau lien tiep (brute-force protection), tu mo sau toi da 15 phut.
 
-Trang dang ky Keycloak (request 03) chi duoc kiem tra la mo duoc; user tu dang ky luon chi co role Rider. Request 16 xac nhan client mobile khong dung duoc password grant. Khong dung password production. Neu environment cu co token/ID trung ten, xoa cac bien do de khong che collection variables.
+Request 03 dang ky Rider moi qua Gateway (`POST /api/auth/register`, khong can token) va phai nhan role Rider; trang dang ky cua Keycloak da tat. Request 16 xac nhan client mobile khong dung duoc password grant. Khong dung password production. Neu environment cu co token/ID trung ten, xoa cac bien do de khong che collection variables.
 
 ## Newman
 
@@ -43,11 +43,11 @@ node --test postman/collection.test.cjs
 ## Trinh tu nghiep vu
 
 - Kiem tra discovery Keycloak; Rider/Driver/Admin dang nhap qua Keycloak; `/userinfo` tra dung role, Rider khong co role Driver/Admin.
-- Driver phu offline, Driver chinh online; Rider tao Trip o Requested.
-- Gui lai cung idempotency key/payload tra cung Trip; doi payload bi 409.
+- Driver phu offline, Driver chinh online; Rider tao Trip o Requested voi `paymentMethod: "Card"`.
+- Gui lai cung idempotency key/payload tra cung Trip; doi payload (diem den, hoac Card -> Wallet) bi 409; `paymentMethod: "Cash"` bi 400.
 - Confirm price tra 202; polling invitation, Driver accept, enroute, pickup.
 - Dropoff tra 202; Trip cho Payment qua RabbitMQ; polling den Paid.
-- Payment Succeeded phai khop gia Trip va canonical idempotency key.
+- Payment Succeeded phai khop gia Trip va canonical idempotency key, va ghi `paymentMethod: "Card"`. Chuyen bi huy khong gui phuong thuc nen mac dinh `Wallet`.
 - Token sua role thanh Admin, token alg none va token co exp da qua deu bi 401.
 - Rider khac bi chan doc Trip/Payment, Rider khong duoc refund hay force Paid.
 - Admin refund Payment tra 200 `Refunded`; refund lan hai bi 409; Rider doc lai thay `Refunded`.

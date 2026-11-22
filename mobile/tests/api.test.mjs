@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coordinates, estimateRoute, isTerminal, pointsOf, priceText, readClaims, riderCanCancel, statusName } from '../shared/api/trip.ts';
+import { coordinates, estimateRoute, isTerminal, paymentMethods, paymentMethodText, pointsOf, priceText, readClaims, riderCanCancel, statusName } from '../shared/api/trip.ts';
 
 test('Trip status numbers map in one place; unknown values never look final', () => {
   assert.equal(statusName(0), 'Requested');
@@ -44,4 +44,12 @@ test('trip points come from the server; missing or invalid coordinates give null
     { pickup: { latitude: 10.76, longitude: 106.68 }, destination: { latitude: 10.77, longitude: 106.7 } });
   assert.deepEqual(pointsOf({ pickupLatitude: 10.76, pickupLongitude: 106.68 }), { pickup: { latitude: 10.76, longitude: 106.68 }, destination: null });
   assert.deepEqual(pointsOf({ pickupLatitude: Number.NaN, pickupLongitude: 1, dropoffLatitude: null, dropoffLongitude: 106 }), { pickup: null, destination: null });
+});
+
+test('payment methods match the backend names; older trips without one show the wallet', () => {
+  assert.deepEqual([...paymentMethods], ['Wallet', 'Card']);
+  assert.equal(paymentMethodText('Card'), 'Thẻ');
+  assert.equal(paymentMethodText('Wallet'), 'Ví SwiftRide');
+  assert.equal(paymentMethodText(undefined), 'Ví SwiftRide');
+  assert.equal(paymentMethodText('Crypto'), 'Crypto', 'unknown values are shown as sent, never relabelled');
 });
