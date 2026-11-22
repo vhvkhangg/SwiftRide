@@ -29,7 +29,7 @@ Trang dang ky Keycloak (request 03) chi duoc kiem tra la mo duoc; user tu dang k
 Lenh tai Newman vao npm cache neu chua co, khong them dependency vao repository:
 
 ```powershell
-npm exec --yes --package=newman@6.2.3 -- newman run postman/SwiftRide.postman_collection.json -e postman/SwiftRide.local.postman_environment.json --delay-request 500 --timeout-request 15000 --timeout-script 5000 --timeout 240000 --reporters cli,junit --reporter-junit-export TestResults/postman.xml
+npm exec --yes --package=newman@6.2.3 -- newman run postman/SwiftRide.postman_collection.json -e postman/SwiftRide.local.postman_environment.json --iteration-count 1 --bail --delay-request 500 --timeout-request 20000 --timeout-script 5000 --timeout 360000 --reporters cli,junit --reporter-junit-export TestResults/postman.xml
 ```
 
 Override URL neu can: them `--env-var baseUrl=http://127.0.0.1:15100`. Khong truyen password that tren command line/log; sua gia tri local trong Postman. Khong public report co thong tin nhay cam. Khong dat iteration count lon hon 1 cho demo cham.
