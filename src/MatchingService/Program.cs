@@ -11,6 +11,7 @@ using SwiftRide.MatchingService.Domain.Interfaces;
 using SwiftRide.MatchingService.Infrastructure.Repositories;
 using SwiftRide.MatchingService.Infrastructure.Time;
 using SwiftRide.MatchingService.Api.Middleware;
+using MongoDB.Bson;
 
 var builder = WebApplication.CreateBuilder(args);
 // Tham số giá và TTL vị trí đổi được khi đang chạy: file tự nạp lại; biến môi trường vẫn ghi đè (test).
@@ -49,7 +50,9 @@ builder.Services.AddSingleton<IMongoDatabase>(serviceProvider =>
     serviceProvider.GetRequiredService<IMongoClient>().GetDatabase(
         MongoUrl.Create(mongoConnectionString).DatabaseName ?? "swiftride_matching"));
 builder.Services.AddHostedService<ReservationRecoveryWorker>();
+builder.Services.AddHostedService<MatchingOutboxDispatcher>();
 builder.Services.AddSingleton<IDriverRepository, MongoDriverRepository>();
+builder.Services.AddSingleton<IMatchingOutboxRepository, MongoMatchingOutboxRepository>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 builder.Services.AddScoped<IPricingService, PricingService>();
 builder.Services.AddScoped<IMatchingService, MatchingService>();
@@ -104,8 +107,12 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 await app.Services.GetRequiredService<IDriverRepository>().EnsureIndexesAsync(CancellationToken.None);
-var mongoClient = app.Services.GetRequiredService<IMongoClient>();
-await MongoDbSeeder.SeedAsync(app.Services.GetRequiredService<IMongoDatabase>());
+var database = app.Services.GetRequiredService<IMongoDatabase>();
+var hello = await database.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1));
+if (!hello.Contains("setName") || !hello["isWritablePrimary"].AsBoolean)
+    throw new InvalidOperationException("Matching Outbox cần MongoDB replica set primary; cấu hình standalone không hỗ trợ transaction.");
+await app.Services.GetRequiredService<IMatchingOutboxRepository>().EnsureIndexesAsync(CancellationToken.None);
+await MongoDbSeeder.SeedAsync(database);
 app.Run();
 
 public partial class Program;
