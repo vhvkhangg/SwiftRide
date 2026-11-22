@@ -234,6 +234,22 @@ services:
     ports:
       - "8180:8080"
 
+  # One-shot: makes sure an existing Keycloak realm (imported before in-app sign-up existed) has the
+  # registration client, its manage-users role, the Rider default role and the registration page off.
+  # --import-realm skips realms that already exist, so without this old dev databases answer 503 on sign-up.
+  keycloak-setup:
+    image: quay.io/keycloak/keycloak:26.4
+    entrypoint: ["/bin/bash", "/opt/swiftride/ensure-registration.sh"]
+    environment:
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-keycloak-admin-dev}
+      REGISTRATION_CLIENT_SECRET: ${REGISTRATION_CLIENT_SECRET:-swiftride-registration-dev-secret}
+    volumes:
+      - ./keycloak/ensure-registration.sh:/opt/swiftride/ensure-registration.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
   api-gateway:
     build:
       context: .
@@ -253,6 +269,8 @@ services:
       ReverseProxy__Clusters__matching__Destinations__primary__Address: http://matching-service:8080/
       ReverseProxy__Clusters__payment__Destinations__primary__Address: http://payment-service:8080/
     depends_on:
+      keycloak-setup:
+        condition: service_completed_successfully
       keycloak:
         condition: service_healthy
       trip-service:
