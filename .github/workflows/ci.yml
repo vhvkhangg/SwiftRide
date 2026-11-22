@@ -26,6 +26,8 @@ jobs:
         run: dotnet test --solution SwiftRide.sln -c Release --no-build -- --filter-not-trait Category=Integration
       - name: System test helper checks
         run: python3 -m unittest discover -s tests/System -p 'test_*.py'
+      - name: Validate Postman offline scripts
+        run: node --test postman/collection.test.cjs
 
   integration:
     needs: unit
@@ -51,3 +53,59 @@ jobs:
             artifacts/task5/system-current/command-failure.log
             artifacts/task5/system-current/services.log
           if-no-files-found: error
+
+  postman:
+    needs: unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Start full stack with Docker Compose
+        run: |
+          if [ ! -f .env ]; then cp .env.example .env; fi
+          docker compose up -d --build
+      - name: Wait for API and backend services
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 5 http://localhost:5100/health/ready > /dev/null && \
+               curl -fsS --max-time 5 http://localhost:8180/realms/swiftride/.well-known/openid-configuration > /dev/null && \
+               curl -fsS --max-time 5 http://localhost:5101/health > /dev/null && \
+               curl -fsS --max-time 5 http://localhost:5102/health > /dev/null && \
+               curl -fsS --max-time 5 http://localhost:5103/health > /dev/null; then
+              echo "Gateway, Keycloak, Trip, Matching, and Payment are ready."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Timed out waiting for the API stack to become ready."
+          docker compose ps
+          docker compose logs --tail 100 api-gateway keycloak trip-service matching-service payment-service
+          exit 1
+      - name: Run Postman E2E collection via Newman
+        run: |
+          mkdir -p TestResults
+          npm exec --yes --package=newman@6.2.3 -- newman run postman/SwiftRide.postman_collection.json \
+            -e postman/SwiftRide.local.postman_environment.json \
+            --iteration-count 1 \
+            --bail \
+            --delay-request 500 \
+            --timeout-request 20000 \
+            --timeout-script 5000 \
+            --timeout 360000 \
+            --reporters cli,junit \
+            --reporter-junit-export TestResults/postman.xml
+      - name: Collect container logs on failure
+        if: failure()
+        run: |
+          mkdir -p TestResults
+          docker compose ps > TestResults/docker-ps.log
+          docker compose logs --tail 200 > TestResults/docker-services.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: postman-e2e-report
+          path: TestResults/
+          if-no-files-found: ignore
