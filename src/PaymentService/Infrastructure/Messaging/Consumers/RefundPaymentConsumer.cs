@@ -3,7 +3,7 @@ using SwiftRide.Contracts.Payments;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Domain.Enums;
 
-namespace SwiftRide.PaymentService.Application.Consumers;
+namespace SwiftRide.PaymentService.Infrastructure.Messaging.Consumers;
 
 /// <summary>
 /// Lệnh bù trừ từ Saga thanh toán: hoàn tiền một payment đã thành công.

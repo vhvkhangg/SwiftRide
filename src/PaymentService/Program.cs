@@ -11,7 +11,7 @@ using SwiftRide.PaymentService.Api.Endpoints;
 using SwiftRide.PaymentService.Application.Integrations;
 using SwiftRide.PaymentService.Infrastructure.Clients;
 using MassTransit;
-using SwiftRide.PaymentService.Application.Consumers;
+using SwiftRide.PaymentService.Infrastructure.Messaging.Consumers;
 using SwiftRide.PaymentService.Application.Exceptions;
 using SwiftRide.PaymentService.Domain.Exceptions;
 
@@ -66,8 +66,10 @@ builder.Services.AddScoped<
     IPaymentApplicationService,
     PaymentApplicationService>();
 
-// Factory pattern: tạo IPaymentMethod (Wallet/Card) theo PaymentMethod của lệnh thanh toán.
-builder.Services.AddSingleton<IPaymentMethodFactory, PaymentMethodFactory>();
+// Đăng ký các Strategy; Factory nhận tất cả IPaymentMethod qua DI.
+builder.Services.AddScoped<IPaymentMethod, WalletPaymentMethod>();
+builder.Services.AddScoped<IPaymentMethod, CardPaymentMethod>();
+builder.Services.AddScoped<IPaymentMethodFactory, PaymentMethodFactory>();
 builder.Services.AddScoped<IPaymentDecisionService, PaymentMethodDecisionService>();
 
 builder.Services.AddServiceSecurity(builder.Configuration);

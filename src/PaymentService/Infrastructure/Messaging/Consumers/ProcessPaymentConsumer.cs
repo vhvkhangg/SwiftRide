@@ -1,12 +1,12 @@
 using MassTransit;
 using SwiftRide.Contracts.Payments;
 using SwiftRide.PaymentService.Application.DTOs;
-using SwiftRide.PaymentService.Application.Messaging;
+using SwiftRide.PaymentService.Infrastructure.Messaging.Mappers;
 using SwiftRide.PaymentService.Application.Services;
 using SwiftRide.PaymentService.Domain.Enums;
 using SwiftRide.PaymentService.Application.Exceptions;
 
-namespace SwiftRide.PaymentService.Application.Consumers;
+namespace SwiftRide.PaymentService.Infrastructure.Messaging.Consumers;
 
 public sealed class ProcessPaymentConsumer : IConsumer<ProcessPaymentV1>
 {

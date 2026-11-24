@@ -53,19 +53,4 @@ public sealed class TripServiceClient : ITripServiceClient
             data.FareEstimate,
             status);
     }
-
-
-    public async Task MarkPaidAsync(
-        Guid tripId,
-        CancellationToken cancellationToken = default
-    )
-    {
-        using var response = await _httpClient.PostAsync(
-            $"internal/trips/{tripId:D}/pay",
-            content: null,
-            cancellationToken: cancellationToken
-        );
-
-        response.EnsureSuccessStatusCode();
-    }
 }

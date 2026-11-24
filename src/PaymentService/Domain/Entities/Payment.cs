@@ -13,6 +13,7 @@ public class Payment
     public string PayeeAccount { get; private set; } = string.Empty;
     /// <summary>Phương thức đã dùng để thu tiền (Wallet/Card); bản ghi cũ là Wallet.</summary>
     public PaymentMethodType PaymentMethod { get; private set; } = PaymentMethodType.Wallet;
+    // Giữ tương thích schema và API cũ; luồng RabbitMQ không cập nhật cờ này.
     public bool IsTripSynced { get; private set; }
     public string? FailureCode { get; private set; }
     public string? FailureReason { get; private set; }
@@ -89,15 +90,6 @@ public class Payment
     {
         EnsureStatus(PaymentStatus.Succeeded);
         Status = PaymentStatus.Refunded;
-        Version++;
-        UpdatedAt = DateTimeOffset.UtcNow;
-    }
-
-    public void MarkTripSynced()
-    {
-        EnsureStatus(PaymentStatus.Succeeded);
-        if (IsTripSynced) return;
-        IsTripSynced = true;
         Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
     }

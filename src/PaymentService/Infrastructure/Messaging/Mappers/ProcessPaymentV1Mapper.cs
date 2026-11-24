@@ -2,7 +2,7 @@ using SwiftRide.Contracts.Payments;
 using SwiftRide.PaymentService.Application.DTOs;
 using SwiftRide.PaymentService.Domain.Enums;
 
-namespace SwiftRide.PaymentService.Application.Messaging;
+namespace SwiftRide.PaymentService.Infrastructure.Messaging.Mappers;
 
 public static class ProcessPaymentV1Mapper
 {
